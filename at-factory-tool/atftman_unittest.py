@@ -9,6 +9,7 @@ from mock import patch
 
 files = []
 
+
 class AtftManTest(unittest.TestCase):
   ATFA_TEST_SERIAL = 'ATFA_TEST_SERIAL'
   TEST_TMP_FOLDER = '/tmp/TMPTEST/'
@@ -19,6 +20,7 @@ class AtftManTest(unittest.TestCase):
   TEST_LOCATION = 'BUS1-PORT1'
   TEST_LOCATION2 = 'BUS2-PORT1'
   TEST_LOCATION3 = 'BUS1-PORT2'
+  TEST_ID = '0000000000'
 
   class FastbootDeviceTemplate(object):
 
@@ -109,7 +111,6 @@ class AtftManTest(unittest.TestCase):
                      self.TEST_SERIAL)
     self.assertEqual(atft_manager.target_devs[1].serial_number,
                      self.TEST_SERIAL2)
-
 
   def testListDevicesChangeNorm(self):
     mock_fastboot = MagicMock()
@@ -442,6 +443,67 @@ class AtftManTest(unittest.TestCase):
     self.assertNotEqual(test_device1, test_device2)
     self.assertNotEqual(test_device1, test_device3)
     self.assertNotEqual(test_device1, test_device4)
+
+  # Test AtfaDeviceManager.CheckStatus
+  def testCheckStatus(self):
+    mock_atft_manager = MagicMock()
+    mock_atfa_dev = MagicMock()
+    mock_atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(mock_atft_manager)
+    mock_atft_manager.product_id = self.TEST_ID
+    mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) 100\nTEST'
+    test_number = test_atfa_device_manager.CheckStatus()
+    mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
+    self.assertEqual(100, test_number)
+
+  def testCheckStatusCRLF(self):
+    mock_atft_manager = MagicMock()
+    mock_atfa_dev = MagicMock()
+    mock_atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(mock_atft_manager)
+    mock_atft_manager.product_id = self.TEST_ID
+    mock_atfa_dev.Oem.return_value = 'TEST\r\n(bootloader) 100\r\nTEST'
+    test_number = test_atfa_device_manager.CheckStatus()
+    mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
+    self.assertEqual(100, test_number)
+
+  def testCheckStatusNoProductId(self):
+    mock_atft_manager = MagicMock()
+    mock_atfa_dev = MagicMock()
+    mock_atft_manager.atfa_dev = mock_atfa_dev
+    mock_atft_manager.product_id = None
+    test_atfa_device_manager = atftman.AtfaDeviceManager(mock_atft_manager)
+    mock_atfa_dev.Oem.return_value = 'TEST\r\n(bootloader) 100\r\nTEST'
+    with self.assertRaises(fastboot_exceptions.ProductNotSpecifiedException):
+      test_atfa_device_manager.CheckStatus()
+
+  def testCheckStatusNoATFA(self):
+    mock_atft_manager = MagicMock()
+    mock_atft_manager.atfa_dev = None
+    mock_atft_manager.product_id = self.TEST_ID
+    test_atfa_device_manager = atftman.AtfaDeviceManager(mock_atft_manager)
+    with self.assertRaises(fastboot_exceptions.DeviceNotFoundException):
+      test_atfa_device_manager.CheckStatus()
+
+  def testCheckStatusInvalidFormat(self):
+    mock_atft_manager = MagicMock()
+    mock_atfa_dev = MagicMock()
+    mock_atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(mock_atft_manager)
+    mock_atft_manager.product_id = self.TEST_ID
+    mock_atfa_dev.Oem.return_value = 'TEST\nTEST'
+    with self.assertRaises(fastboot_exceptions.FastbootFailure):
+      test_atfa_device_manager.CheckStatus()
+
+  def testCheckStatusInvalidNumber(self):
+    mock_atft_manager = MagicMock()
+    mock_atfa_dev = MagicMock()
+    mock_atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(mock_atft_manager)
+    mock_atft_manager.product_id = self.TEST_ID
+    mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) abcd\nTEST'
+    with self.assertRaises(fastboot_exceptions.FastbootFailure):
+      test_atfa_device_manager.CheckStatus()
 
 
 if __name__ == '__main__':

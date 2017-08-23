@@ -4,6 +4,7 @@ import unittest
 import atft
 
 from mock import MagicMock
+import fastboot_exceptions
 
 
 class MockAtft(atft.Atft):
@@ -91,6 +92,51 @@ class AtftTest(unittest.TestCase):
     mock_atft.atft_manager.target_devs = []
     mock_atft._DeviceListedEventHandler(None)
     self.assertEqual(0, len(self.test_target_devs))
+
+  def testProcessKeySuccess(self):
+    mock_atft = MockAtft(None)
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.atfa_dev_manager = MagicMock()
+    mock_atft._SendOperationStartEvent = MagicMock()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
+    mock_atft.PauseRefresh = MagicMock()
+    mock_atft.ResumeRefresh = MagicMock()
+    mock_atft._HandleException = MagicMock()
+
+    mock_atft._ProcessKey('test')
+    mock_atft.PauseRefresh.assert_called_once()
+    mock_atft.ResumeRefresh.assert_called_once()
+    mock_atft._HandleException.assert_not_called()
+
+    mock_atft._SendOperationStartEvent.assert_called_once()
+    mock_atft._SendOperationSucceedEvent.assert_called_once()
+
+  def testProcessKeyFailure(self):
+    self.TestProcessKeyFailureCommon(fastboot_exceptions.FastbootFailure(''))
+    self.TestProcessKeyFailureCommon(
+        fastboot_exceptions.ProductNotSpecifiedException)
+    self.TestProcessKeyFailureCommon(
+        fastboot_exceptions.DeviceNotFoundException)
+
+  def TestProcessKeyFailureCommon(self, exception):
+    mock_atft = MockAtft(None)
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.atfa_dev_manager = MagicMock()
+    mock_atft._SendOperationStartEvent = MagicMock()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
+    mock_atft.PauseRefresh = MagicMock()
+    mock_atft.ResumeRefresh = MagicMock()
+    mock_atft._HandleException = MagicMock()
+
+    mock_atft.atft_manager.atfa_dev_manager.ProcessKey.side_effect = exception
+
+    mock_atft._ProcessKey('test')
+    mock_atft.PauseRefresh.assert_called_once()
+    mock_atft.ResumeRefresh.assert_called_once()
+    mock_atft._HandleException.assert_called_once()
+
+    mock_atft._SendOperationStartEvent.assert_called_once()
+    mock_atft._SendOperationSucceedEvent.assert_not_called()
 
 
 if __name__ == '__main__':
