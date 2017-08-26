@@ -27,6 +27,7 @@
 #include <base/files/file_util.h>
 #include <base/strings/stringprintf.h>
 #include <gtest/gtest.h>
+#include <memory>
 #include <string>
 
 #include <openssl/aead.h>
@@ -123,10 +124,15 @@ AtapResult FakeAtapOps::ecdh_shared_secret_compute(
            reinterpret_cast<uint8_t*>(&ca_privkey[0]),
            other_public_key);
   } else if (curve == ATAP_CURVE_TYPE_P256) {
-    EC_GROUP* group = EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1);
-    EC_POINT* other_point = EC_POINT_new(group);
-    if (!EC_POINT_oct2point(
-            group, other_point, other_public_key, ATAP_ECDH_KEY_LEN, NULL)) {
+    std::unique_ptr<EC_GROUP, decltype(&EC_GROUP_free)> group(
+        EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1), EC_GROUP_free);
+    std::unique_ptr<EC_POINT, decltype(&EC_POINT_free)> other_point(
+        EC_POINT_new(group.get()), EC_POINT_free);
+    if (!EC_POINT_oct2point(group.get(),
+                            other_point.get(),
+                            other_public_key,
+                            ATAP_ECDH_KEY_LEN,
+                            NULL)) {
       fprintf(stderr, "Deserializing other_public_key failed\n");
       return ATAP_RESULT_ERROR_CRYPTO;
     }
@@ -135,32 +141,31 @@ AtapResult FakeAtapOps::ecdh_shared_secret_compute(
     EXPECT_TRUE(
         base::ReadFileToString(base::FilePath(kCaP256PrivateKey), &ca_privkey));
     const uint8_t* buf_ptr = reinterpret_cast<const uint8_t*>(&ca_privkey[0]);
-    EC_KEY* pkey = d2i_ECPrivateKey(nullptr, &buf_ptr, ca_privkey.size());
-    if (!pkey) {
+    std::unique_ptr<EC_KEY, decltype(&EC_KEY_free)> pkey(
+        d2i_ECPrivateKey(nullptr, &buf_ptr, ca_privkey.size()), EC_KEY_free);
+    if (!pkey.get()) {
       fprintf(stderr, "Error reading ECC key\n");
       return ATAP_RESULT_ERROR_CRYPTO;
     }
-    EC_KEY_set_group(pkey, group);
+    EC_KEY_set_group(pkey.get(), group.get());
 
-    const EC_POINT* public_point = EC_KEY_get0_public_key(pkey);
-    if (!EC_POINT_point2oct(group,
+    const EC_POINT* public_point = EC_KEY_get0_public_key(pkey.get());
+    if (!EC_POINT_point2oct(group.get(),
                             public_point,
                             POINT_CONVERSION_COMPRESSED,
                             public_key,
                             ATAP_ECDH_KEY_LEN,
                             NULL)) {
       fprintf(stderr, "Serializing public_key failed\n");
-      EC_KEY_free(pkey);
       return ATAP_RESULT_ERROR_CRYPTO;
     }
 
     if (-1 == ECDH_compute_key(shared_secret,
                                ATAP_ECDH_SHARED_SECRET_LEN,
-                               other_point,
-                               pkey,
+                               other_point.get(),
+                               pkey.get(),
                                NULL)) {
       fprintf(stderr, "Error computing shared secret\n");
-      EC_KEY_free(pkey);
       return ATAP_RESULT_ERROR_CRYPTO;
     }
   } else {
