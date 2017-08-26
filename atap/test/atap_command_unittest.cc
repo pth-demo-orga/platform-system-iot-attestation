@@ -42,17 +42,20 @@ class CommandTest : public BaseAtapTest {
                            uint32_t buf_size,
                            AtapOperation operation);
   void compute_session_key(const uint8_t device_public_key[ATAP_ECDH_KEY_LEN]);
+  void set_curve(AtapCurveType curve) {
+    curve_ = curve;
+  }
+
+ private:
+  AtapCurveType curve_ = ATAP_CURVE_TYPE_X25519;
 };
 
 void CommandTest::compute_session_key(
     const uint8_t device_pubkey[ATAP_ECDH_KEY_LEN]) {
   uint8_t shared_secret[ATAP_ECDH_KEY_LEN];
   uint8_t ca_pubkey[ATAP_ECDH_KEY_LEN];
-  AtapResult ret = ops_.ecdh_shared_secret_compute(ops_.atap_ops(),
-                                                   ATAP_CURVE_TYPE_X25519,
-                                                   device_pubkey,
-                                                   ca_pubkey,
-                                                   shared_secret);
+  AtapResult ret = ops_.ecdh_shared_secret_compute(
+      ops_.atap_ops(), curve_, device_pubkey, ca_pubkey, shared_secret);
   ASSERT_EQ(ret, ATAP_RESULT_OK);
   ret = derive_session_key(ops_.atap_ops(),
                            device_pubkey,
@@ -111,10 +114,10 @@ void CommandTest::validate_ca_request(const uint8_t* buf,
   atap_free(inner);
 }
 
-TEST_F(CommandTest, GetCaRequestIssue) {
+TEST_F(CommandTest, GetCaRequestIssueX25519) {
   std::string operation_start;
-  ASSERT_TRUE(base::ReadFileToString(base::FilePath(kIssueOperationStartPath),
-                                     &operation_start));
+  ASSERT_TRUE(base::ReadFileToString(
+      base::FilePath(kIssueX25519OperationStartPath), &operation_start));
   uint32_t ca_request_size;
   uint8_t* ca_request;
   AtapResult res = atap_get_ca_request(ops_.atap_ops(),
@@ -123,20 +126,14 @@ TEST_F(CommandTest, GetCaRequestIssue) {
                                        &ca_request,
                                        &ca_request_size);
   EXPECT_EQ(ATAP_RESULT_OK, res);
-
-  std::string ca_ecdh_private_key;
-  ASSERT_TRUE(base::ReadFileToString(base::FilePath(kCaEcdhPrivateKey),
-                                     &ca_ecdh_private_key));
-
   validate_ca_request(ca_request, ca_request_size, ATAP_OPERATION_ISSUE);
-
   atap_free(ca_request);
 }
 
-TEST_F(CommandTest, SetCaResponseIssue) {
+TEST_F(CommandTest, SetCaResponseIssueX25519) {
   std::string inner;
-  ASSERT_TRUE(base::ReadFileToString(base::FilePath(kIssueInnerCaResponsePath),
-                                     &inner));
+  ASSERT_TRUE(base::ReadFileToString(
+      base::FilePath(kIssueX25519InnerCaResponsePath), &inner));
   uint32_t ca_response_size = ATAP_HEADER_LEN + ATAP_GCM_IV_LEN +
                               sizeof(uint32_t) + inner.size() +
                               ATAP_GCM_TAG_LEN;
@@ -160,6 +157,23 @@ TEST_F(CommandTest, SetCaResponseIssue) {
   res = atap_set_ca_response(ops_.atap_ops(), ca_response, ca_response_size);
   EXPECT_EQ(ATAP_RESULT_OK, res);
   atap_free(ca_response);
+}
+
+TEST_F(CommandTest, GetCaRequestIssueP256) {
+  set_curve(ATAP_CURVE_TYPE_P256);
+  std::string operation_start;
+  ASSERT_TRUE(base::ReadFileToString(
+      base::FilePath(kIssueP256OperationStartPath), &operation_start));
+  uint32_t ca_request_size;
+  uint8_t* ca_request;
+  AtapResult res = atap_get_ca_request(ops_.atap_ops(),
+                                       (uint8_t*)&operation_start[0],
+                                       operation_start.size(),
+                                       &ca_request,
+                                       &ca_request_size);
+  EXPECT_EQ(ATAP_RESULT_OK, res);
+  validate_ca_request(ca_request, ca_request_size, ATAP_OPERATION_ISSUE);
+  atap_free(ca_request);
 }
 
 }  // namespace atap
