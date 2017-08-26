@@ -323,8 +323,8 @@ TEST_F(UtilTest, ValidateEncryptedMessage) {
 TEST_F(UtilTest, ValidateInnerCaResponse) {
   std::string inner_ca_resp;
 
-  ASSERT_TRUE(base::ReadFileToString(base::FilePath(kIssueInnerCaResponsePath),
-                                     &inner_ca_resp));
+  ASSERT_TRUE(base::ReadFileToString(
+      base::FilePath(kIssueX25519InnerCaResponsePath), &inner_ca_resp));
   ASSERT_EQ(6954, (int)inner_ca_resp.size());
   EXPECT_EQ(true,
             validate_inner_ca_response((uint8_t*)&inner_ca_resp[0],

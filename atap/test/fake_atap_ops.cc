@@ -32,7 +32,10 @@
 #include <openssl/aead.h>
 #include <openssl/curve25519.h>
 #include <openssl/digest.h>
+#include <openssl/ec.h>
+#include <openssl/ecdh.h>
 #include <openssl/hkdf.h>
+#include <openssl/obj_mac.h>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
 
@@ -105,13 +108,13 @@ AtapResult FakeAtapOps::ecdh_shared_secret_compute(
     const uint8_t other_public_key[ATAP_ECDH_KEY_LEN],
     uint8_t public_key[ATAP_ECDH_KEY_LEN],
     uint8_t shared_secret[ATAP_ECDH_SHARED_SECRET_LEN]) {
-  std::string ca_privkey;
-  EXPECT_TRUE(
-      base::ReadFileToString(base::FilePath(kCaEcdhPrivateKey), &ca_privkey));
-  std::string ca_pubkey;
-  EXPECT_TRUE(
-      base::ReadFileToString(base::FilePath(kCaEcdhPublicKey), &ca_pubkey));
   if (curve == ATAP_CURVE_TYPE_X25519) {
+    std::string ca_privkey;
+    EXPECT_TRUE(base::ReadFileToString(base::FilePath(kCaX25519PrivateKey),
+                                       &ca_privkey));
+    std::string ca_pubkey;
+    EXPECT_TRUE(
+        base::ReadFileToString(base::FilePath(kCaX25519PublicKey), &ca_pubkey));
     memset(public_key, 0, ATAP_ECDH_KEY_LEN);
     memcpy(public_key,
            reinterpret_cast<uint8_t*>(&ca_pubkey[0]),
@@ -119,9 +122,50 @@ AtapResult FakeAtapOps::ecdh_shared_secret_compute(
     X25519(shared_secret,
            reinterpret_cast<uint8_t*>(&ca_privkey[0]),
            other_public_key);
+  } else if (curve == ATAP_CURVE_TYPE_P256) {
+    EC_GROUP* group = EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1);
+    EC_POINT* other_point = EC_POINT_new(group);
+    if (!EC_POINT_oct2point(
+            group, other_point, other_public_key, ATAP_ECDH_KEY_LEN, NULL)) {
+      fprintf(stderr, "Deserializing other_public_key failed\n");
+      return ATAP_RESULT_ERROR_CRYPTO;
+    }
+
+    std::string ca_privkey;
+    EXPECT_TRUE(
+        base::ReadFileToString(base::FilePath(kCaP256PrivateKey), &ca_privkey));
+    const uint8_t* buf_ptr = reinterpret_cast<const uint8_t*>(&ca_privkey[0]);
+    EC_KEY* pkey = d2i_ECPrivateKey(nullptr, &buf_ptr, ca_privkey.size());
+    if (!pkey) {
+      fprintf(stderr, "Error reading ECC key\n");
+      return ATAP_RESULT_ERROR_CRYPTO;
+    }
+    EC_KEY_set_group(pkey, group);
+
+    const EC_POINT* public_point = EC_KEY_get0_public_key(pkey);
+    if (!EC_POINT_point2oct(group,
+                            public_point,
+                            POINT_CONVERSION_COMPRESSED,
+                            public_key,
+                            ATAP_ECDH_KEY_LEN,
+                            NULL)) {
+      fprintf(stderr, "Serializing public_key failed\n");
+      EC_KEY_free(pkey);
+      return ATAP_RESULT_ERROR_CRYPTO;
+    }
+
+    if (-1 == ECDH_compute_key(shared_secret,
+                               ATAP_ECDH_SHARED_SECRET_LEN,
+                               other_point,
+                               pkey,
+                               NULL)) {
+      fprintf(stderr, "Error computing shared secret\n");
+      EC_KEY_free(pkey);
+      return ATAP_RESULT_ERROR_CRYPTO;
+    }
   } else {
     fprintf(stderr, "Unsupported ECDH curve: %d\n", curve);
-    return ATAP_RESULT_ERROR_CRYPTO;
+    return ATAP_RESULT_ERROR_UNSUPPORTED_OPERATION;
   }
   return ATAP_RESULT_OK;
 }
