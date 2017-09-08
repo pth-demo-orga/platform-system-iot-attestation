@@ -24,8 +24,7 @@
 
 #include "openssl_ops.h"
 
-#include <memory>
-
+#include <libatap/libatap.h>
 #include <openssl/aead.h>
 #include <openssl/curve25519.h>
 #include <openssl/digest.h>
@@ -54,81 +53,90 @@ AtapResult OpensslOps::ecdh_shared_secret_compute(
     const uint8_t other_public_key[ATAP_ECDH_KEY_LEN],
     uint8_t public_key[ATAP_ECDH_KEY_LEN],
     uint8_t shared_secret[ATAP_ECDH_SHARED_SECRET_LEN]) {
+  AtapResult result = ATAP_RESULT_OK;
+  EC_GROUP* group = NULL;
+  EC_POINT* other_point = NULL;
+  EC_KEY* pkey = NULL;
   if (curve == ATAP_CURVE_TYPE_X25519) {
     uint8_t x25519_priv_key[32];
     uint8_t x25519_pub_key[32];
     if (test_key_size_ == 32) {
-      memcpy(x25519_priv_key, test_key_, 32);
+      atap_memcpy(x25519_priv_key, test_key_, 32);
       X25519_public_from_private(x25519_pub_key, x25519_priv_key);
     } else {
       // Generate an ephemeral key pair.
       X25519_keypair(x25519_pub_key, x25519_priv_key);
     }
-    memset(public_key, 0, ATAP_ECDH_KEY_LEN);
-    memcpy(public_key, x25519_pub_key, 32);
+    atap_memset(public_key, 0, ATAP_ECDH_KEY_LEN);
+    atap_memcpy(public_key, x25519_pub_key, 32);
     X25519(shared_secret, x25519_priv_key, other_public_key);
   } else if (curve == ATAP_CURVE_TYPE_P256) {
-    std::unique_ptr<EC_GROUP, decltype(&EC_GROUP_free)> group(
-        EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1), EC_GROUP_free);
-    std::unique_ptr<EC_POINT, decltype(&EC_POINT_free)> other_point(
-        EC_POINT_new(group.get()), EC_POINT_free);
-    if (!EC_POINT_oct2point(group.get(),
-                            other_point.get(),
+    group = EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1);
+    other_point = EC_POINT_new(group);
+    if (!EC_POINT_oct2point(group,
+                            other_point,
                             other_public_key,
                             ATAP_ECDH_KEY_LEN,
                             NULL)) {
       atap_error("Deserializing other_public_key failed");
-      return ATAP_RESULT_ERROR_CRYPTO;
+      result = ATAP_RESULT_ERROR_CRYPTO;
+      goto out;
     }
 
-    EC_KEY* p256_priv_key;
     if (test_key_size_ > 0) {
       const uint8_t* buf_ptr = test_key_;
-      p256_priv_key = d2i_ECPrivateKey(nullptr, &buf_ptr, test_key_size_);
-      EC_KEY_set_group(p256_priv_key, group.get());
+      pkey = d2i_ECPrivateKey(nullptr, &buf_ptr, test_key_size_);
+      EC_KEY_set_group(pkey, group);
     } else {
-      p256_priv_key = EC_KEY_new();
-      if (!p256_priv_key) {
+      pkey = EC_KEY_new();
+      if (!pkey) {
         atap_error("Error allocating EC key");
-        return ATAP_RESULT_ERROR_OOM;
+        result = ATAP_RESULT_ERROR_OOM;
+        goto out;
       }
-      if (1 != EC_KEY_set_group(p256_priv_key, group.get())) {
+      if (1 != EC_KEY_set_group(pkey, group)) {
         atap_error("EC_KEY_set_group failed");
-        EC_KEY_free(p256_priv_key);
-        return ATAP_RESULT_ERROR_CRYPTO;
+        result = ATAP_RESULT_ERROR_CRYPTO;
+        goto out;
       }
-      if (1 != EC_KEY_generate_key(p256_priv_key)) {
+      if (1 != EC_KEY_generate_key(pkey)) {
         atap_error("EC_KEY_generate_key failed");
-        EC_KEY_free(p256_priv_key);
-        return ATAP_RESULT_ERROR_CRYPTO;
+        result = ATAP_RESULT_ERROR_CRYPTO;
+        goto out;
       }
     }
-    std::unique_ptr<EC_KEY, decltype(&EC_KEY_free)> pkey(p256_priv_key,
-                                                         EC_KEY_free);
-    const EC_POINT* public_point = EC_KEY_get0_public_key(pkey.get());
-    if (!EC_POINT_point2oct(group.get(),
+    const EC_POINT* public_point = EC_KEY_get0_public_key(pkey);
+    if (!EC_POINT_point2oct(group,
                             public_point,
                             POINT_CONVERSION_COMPRESSED,
                             public_key,
                             ATAP_ECDH_KEY_LEN,
                             NULL)) {
       atap_error("Serializing public_key failed");
-      return ATAP_RESULT_ERROR_CRYPTO;
+      result = ATAP_RESULT_ERROR_CRYPTO;
+      goto out;
     }
 
     if (-1 == ECDH_compute_key(shared_secret,
                                ATAP_ECDH_SHARED_SECRET_LEN,
-                               other_point.get(),
-                               pkey.get(),
+                               other_point,
+                               pkey,
                                NULL)) {
       atap_error("Error computing shared secret");
-      return ATAP_RESULT_ERROR_CRYPTO;
+      result = ATAP_RESULT_ERROR_CRYPTO;
+      goto out;
     }
   } else {
     atap_error("Unsupported ECDH curve");
-    return ATAP_RESULT_ERROR_UNSUPPORTED_OPERATION;
+    result = ATAP_RESULT_ERROR_UNSUPPORTED_OPERATION;
+    goto out;
   }
-  return ATAP_RESULT_OK;
+
+out:
+  if (group) EC_GROUP_free(group);
+  if (other_point) EC_POINT_free(other_point);
+  if (pkey) EC_KEY_free(pkey);
+  return result;
 }
 
 AtapResult OpensslOps::aes_gcm_128_encrypt(
@@ -149,7 +157,7 @@ AtapResult OpensslOps::aes_gcm_128_encrypt(
     atap_error("Error initializing EVP_AEAD_CTX");
     return ATAP_RESULT_ERROR_CRYPTO;
   }
-  uint8_t* out_buf = (uint8_t*)malloc(len + ATAP_GCM_TAG_LEN);
+  uint8_t* out_buf = (uint8_t*)atap_malloc(len + ATAP_GCM_TAG_LEN);
   size_t out_len = len + ATAP_GCM_TAG_LEN;
   if (!EVP_AEAD_CTX_seal(&ctx,
                          out_buf,
@@ -165,11 +173,11 @@ AtapResult OpensslOps::aes_gcm_128_encrypt(
     ret = ATAP_RESULT_ERROR_CRYPTO;
     goto out;
   }
-  memcpy(ciphertext, out_buf, len);
-  memcpy(tag, out_buf + len, ATAP_GCM_TAG_LEN);
+  atap_memcpy(ciphertext, out_buf, len);
+  atap_memcpy(tag, out_buf + len, ATAP_GCM_TAG_LEN);
 
 out:
-  free(out_buf);
+  atap_free(out_buf);
   EVP_AEAD_CTX_cleanup(&ctx);
   return ret;
 }
@@ -192,9 +200,9 @@ AtapResult OpensslOps::aes_gcm_128_decrypt(
     atap_error("Error initializing EVP_AEAD_CTX");
     return ATAP_RESULT_ERROR_CRYPTO;
   }
-  uint8_t* in_buf = (uint8_t*)malloc(len + ATAP_GCM_TAG_LEN);
-  memcpy(in_buf, ciphertext, len);
-  memcpy(in_buf + len, tag, ATAP_GCM_TAG_LEN);
+  uint8_t* in_buf = (uint8_t*)atap_malloc(len + ATAP_GCM_TAG_LEN);
+  atap_memcpy(in_buf, ciphertext, len);
+  atap_memcpy(in_buf + len, tag, ATAP_GCM_TAG_LEN);
   size_t out_len = len;
   if (!EVP_AEAD_CTX_open(&ctx,
                          plaintext,
@@ -211,7 +219,7 @@ AtapResult OpensslOps::aes_gcm_128_decrypt(
     goto out;
   }
 out:
-  free(in_buf);
+  atap_free(in_buf);
   EVP_AEAD_CTX_cleanup(&ctx);
   return ret;
 }
@@ -252,7 +260,7 @@ void OpensslOps::SetEcdhKeyForTesting(const void* key_data,
     size_in_bytes = sizeof(test_key_);
   }
   if (size_in_bytes > 0) {
-    memcpy(test_key_, key_data, size_in_bytes);
+    atap_memcpy(test_key_, key_data, size_in_bytes);
   }
   test_key_size_ = size_in_bytes;
 }
