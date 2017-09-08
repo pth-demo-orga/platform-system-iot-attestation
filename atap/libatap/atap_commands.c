@@ -405,7 +405,7 @@ out:
 }
 
 AtapResult atap_set_ca_response(AtapOps* ops,
-                                uint8_t* ca_response,
+                                const uint8_t* ca_response,
                                 uint32_t ca_response_size) {
   AtapResult ret = 0;
   uint8_t* inner_ca_resp = NULL;

@@ -62,16 +62,16 @@ uint8_t* append_cert_chain_to_buf(uint8_t* buf,
   uint32_t cert_chain_size =
       cert_chain_serialized_size(cert_chain) - sizeof(uint32_t);
   uint32_t i = 0;
-  uint8_t* start = buf;
+  uint8_t* local_buf = buf;
 
   /* Append size of cert chain, as it is a Variable field. */
-  buf = append_uint32_to_buf(buf, cert_chain_size);
+  local_buf = append_uint32_to_buf(local_buf, cert_chain_size);
 
   for (i = 0; i < cert_chain->entry_count; ++i) {
-    buf = append_blob_to_buf(buf, &cert_chain->entries[i]);
+    local_buf = append_blob_to_buf(local_buf, &cert_chain->entries[i]);
   }
-  atap_assert(buf == (start + cert_chain_size + sizeof(uint32_t)));
-  return buf;
+  atap_assert(local_buf == (buf + cert_chain_size + sizeof(uint32_t)));
+  return local_buf;
 }
 
 uint8_t* append_ca_request_to_buf(uint8_t* buf,
