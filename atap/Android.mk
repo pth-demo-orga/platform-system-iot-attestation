@@ -67,6 +67,8 @@ LOCAL_SHARED_LIBRARIES := \
     libchrome \
     libcrypto
 LOCAL_SRC_FILES := \
+    ops/atap_ops_provider.cc \
+    ops/openssl_ops.cc \
     test/atap_util_unittest.cc \
     test/atap_command_unittest.cc \
     test/atap_sysdeps_posix_testing.cc \
