@@ -26,6 +26,7 @@
 
 #include "atap_unittest_util.h"
 #include "fake_atap_ops.h"
+#include "ops/atap_ops_provider.h"
 
 namespace atap {
 
@@ -36,7 +37,8 @@ class CommandTest : public BaseAtapTest {
  public:
   CommandTest() {}
 
-  FakeAtapOps ops_;
+  FakeAtapOps fake_ops_;
+  AtapOpsProvider ops_{&fake_ops_};
 
   void validate_ca_request(const uint8_t* buf,
                            uint32_t buf_size,
@@ -44,6 +46,14 @@ class CommandTest : public BaseAtapTest {
   void compute_session_key(const uint8_t device_public_key[ATAP_ECDH_KEY_LEN]);
   void set_curve(AtapCurveType curve) {
     curve_ = curve;
+  }
+  void setup_test_key() {
+    std::string test_key;
+    EXPECT_TRUE(base::ReadFileToString(
+        base::FilePath((curve_ == ATAP_CURVE_TYPE_X25519) ? kCaX25519PrivateKey
+                                                          : kCaP256PrivateKey),
+        &test_key));
+    fake_ops_.SetEcdhKeyForTesting(test_key.data(), test_key.length());
   }
 
  private:
@@ -54,8 +64,8 @@ void CommandTest::compute_session_key(
     const uint8_t device_pubkey[ATAP_ECDH_KEY_LEN]) {
   uint8_t shared_secret[ATAP_ECDH_KEY_LEN];
   uint8_t ca_pubkey[ATAP_ECDH_KEY_LEN];
-  AtapResult ret = ops_.ecdh_shared_secret_compute(
-      ops_.atap_ops(), curve_, device_pubkey, ca_pubkey, shared_secret);
+  AtapResult ret = fake_ops_.ecdh_shared_secret_compute(
+      curve_, device_pubkey, ca_pubkey, shared_secret);
   ASSERT_EQ(ret, ATAP_RESULT_OK);
   ret = derive_session_key(ops_.atap_ops(),
                            device_pubkey,
@@ -84,8 +94,8 @@ void CommandTest::validate_ca_request(const uint8_t* buf,
   const uint8_t* ciphertext = next(buf, &i, ciphertext_len);
   uint8_t* inner = (uint8_t*)atap_malloc(ciphertext_len);
   const uint8_t* tag = next(buf, &i, ATAP_GCM_TAG_LEN);
-  AtapResult ret = ops_.aes_gcm_128_decrypt(
-      ops_.atap_ops(), ciphertext, ciphertext_len, iv, session_key, tag, inner);
+  AtapResult ret = fake_ops_.aes_gcm_128_decrypt(
+      ciphertext, ciphertext_len, iv, session_key, tag, inner);
   EXPECT_EQ(ATAP_RESULT_OK, ret);
   i = 4;
   uint32_t inner_ca_request_size =
@@ -115,6 +125,7 @@ void CommandTest::validate_ca_request(const uint8_t* buf,
 }
 
 TEST_F(CommandTest, GetCaRequestIssueX25519) {
+  setup_test_key();
   std::string operation_start;
   ASSERT_TRUE(base::ReadFileToString(
       base::FilePath(kIssueX25519OperationStartPath), &operation_start));
@@ -131,6 +142,7 @@ TEST_F(CommandTest, GetCaRequestIssueX25519) {
 }
 
 TEST_F(CommandTest, SetCaResponseIssueX25519) {
+  setup_test_key();
   std::string inner;
   ASSERT_TRUE(base::ReadFileToString(
       base::FilePath(kIssueX25519InnerCaResponsePath), &inner));
@@ -141,18 +153,13 @@ TEST_F(CommandTest, SetCaResponseIssueX25519) {
   append_header_to_buf(ca_response, ca_response_size - ATAP_HEADER_LEN);
   uint32_t i = ATAP_HEADER_LEN;
   uint8_t* iv = next(ca_response, &i, ATAP_GCM_IV_LEN);
-  ops_.get_random_bytes(ops_.atap_ops(), iv, ATAP_GCM_IV_LEN);
+  fake_ops_.get_random_bytes(iv, ATAP_GCM_IV_LEN);
   uint32_t* ciphertext_len = (uint32_t*)next(ca_response, &i, sizeof(uint32_t));
   *ciphertext_len = inner.size();
   uint8_t* ciphertext = next(ca_response, &i, *ciphertext_len);
   uint8_t* tag = next(ca_response, &i, ATAP_GCM_TAG_LEN);
-  AtapResult res = ops_.aes_gcm_128_encrypt(ops_.atap_ops(),
-                                            (uint8_t*)&inner[0],
-                                            inner.size(),
-                                            iv,
-                                            session_key,
-                                            ciphertext,
-                                            tag);
+  AtapResult res = fake_ops_.aes_gcm_128_encrypt(
+      (uint8_t*)&inner[0], inner.size(), iv, session_key, ciphertext, tag);
   ASSERT_EQ(ATAP_RESULT_OK, res);
   res = atap_set_ca_response(ops_.atap_ops(), ca_response, ca_response_size);
   EXPECT_EQ(ATAP_RESULT_OK, res);
@@ -161,6 +168,7 @@ TEST_F(CommandTest, SetCaResponseIssueX25519) {
 
 TEST_F(CommandTest, GetCaRequestIssueP256) {
   set_curve(ATAP_CURVE_TYPE_P256);
+  setup_test_key();
   std::string operation_start;
   ASSERT_TRUE(base::ReadFileToString(
       base::FilePath(kIssueP256OperationStartPath), &operation_start));
@@ -173,6 +181,37 @@ TEST_F(CommandTest, GetCaRequestIssueP256) {
                                        &ca_request_size);
   EXPECT_EQ(ATAP_RESULT_OK, res);
   validate_ca_request(ca_request, ca_request_size, ATAP_OPERATION_ISSUE);
+  atap_free(ca_request);
+}
+
+TEST_F(CommandTest, GetCaRequestIssueX25519NoTestKey) {
+  std::string operation_start;
+  ASSERT_TRUE(base::ReadFileToString(
+      base::FilePath(kIssueX25519OperationStartPath), &operation_start));
+  uint32_t ca_request_size;
+  uint8_t* ca_request;
+  AtapResult res = atap_get_ca_request(ops_.atap_ops(),
+                                       (uint8_t*)&operation_start[0],
+                                       operation_start.size(),
+                                       &ca_request,
+                                       &ca_request_size);
+  EXPECT_EQ(ATAP_RESULT_OK, res);
+  atap_free(ca_request);
+}
+
+TEST_F(CommandTest, GetCaRequestIssueP256NoTestKey) {
+  set_curve(ATAP_CURVE_TYPE_P256);
+  std::string operation_start;
+  ASSERT_TRUE(base::ReadFileToString(
+      base::FilePath(kIssueP256OperationStartPath), &operation_start));
+  uint32_t ca_request_size;
+  uint8_t* ca_request;
+  AtapResult res = atap_get_ca_request(ops_.atap_ops(),
+                                       (uint8_t*)&operation_start[0],
+                                       operation_start.size(),
+                                       &ca_request,
+                                       &ca_request_size);
+  EXPECT_EQ(ATAP_RESULT_OK, res);
   atap_free(ca_request);
 }
 
