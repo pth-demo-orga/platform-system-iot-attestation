@@ -41,7 +41,6 @@ LOCAL_MODULE := libatap_host
 LOCAL_MODULE_HOST_OS := linux
 LOCAL_EXPORT_C_INCLUDE_DIRS := $(LOCAL_PATH)
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
-LOCAL_CLANG := true
 LOCAL_CFLAGS := $(atap_common_cflags) -fno-stack-protector -DATAP_ENABLE_DEBUG
 LOCAL_LDFLAGS := $(atap_common_ldflags)
 LOCAL_SRC_FILES := \
@@ -52,7 +51,6 @@ include $(BUILD_HOST_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 LOCAL_MODULE := libatap_host_unittest
 LOCAL_MODULE_HOST_OS := linux
-LOCAL_CLANG := true
 LOCAL_CFLAGS := $(atap_common_cflags) -DATAP_ENABLE_DEBUG
 LOCAL_CPPFLAGS := $(atap_comman_cppflags)
 LOCAL_LDFLAGS := $(atap_common_ldflags)
