@@ -52,7 +52,6 @@ include $(BUILD_HOST_STATIC_LIBRARY)
 include $(CLEAR_VARS)
 LOCAL_MODULE := libatap_host_unittest
 LOCAL_MODULE_HOST_OS := linux
-LOCAL_CPP_EXTENSION := .cc
 LOCAL_CLANG := true
 LOCAL_CFLAGS := $(atap_common_cflags) -DATAP_ENABLE_DEBUG
 LOCAL_CPPFLAGS := $(atap_comman_cppflags)
@@ -67,9 +66,11 @@ LOCAL_SHARED_LIBRARIES := \
     libchrome \
     libcrypto
 LOCAL_SRC_FILES := \
-    test/atap_util_unittest.cc \
-    test/atap_command_unittest.cc \
-    test/atap_sysdeps_posix_testing.cc \
-    test/fake_atap_ops.cc
+    ops/atap_ops_provider.cpp \
+    ops/openssl_ops.cpp \
+    test/atap_util_unittest.cpp \
+    test/atap_command_unittest.cpp \
+    test/atap_sysdeps_posix_testing.cpp \
+    test/fake_atap_ops.cpp
 LOCAL_LDLIBS_linux := -lrt
 include $(BUILD_HOST_NATIVE_TEST)

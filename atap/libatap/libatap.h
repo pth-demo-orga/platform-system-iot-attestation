@@ -49,7 +49,7 @@ AtapResult atap_get_ca_request(AtapOps* ops,
  * (optionally) keys. On success, returns ATAP_RESULT_OK.
  */
 AtapResult atap_set_ca_response(AtapOps* ops,
-                                uint8_t* ca_response,
+                                const uint8_t* ca_response,
                                 uint32_t ca_response_size);
 
 #ifdef __cplusplus
