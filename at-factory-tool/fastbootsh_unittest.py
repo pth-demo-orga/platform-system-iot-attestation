@@ -4,13 +4,22 @@ import unittest
 import fastboot_exceptions
 import fastbootsh
 from mock import patch
+import sh
 
 
 class FastbootShTest(unittest.TestCase):
+
   ATFA_TEST_SERIAL = 'ATFA_TEST_SERIAL'
   TEST_MESSAGE_FAILURE = 'FAIL: TEST MESSAGE'
   TEST_MESSAGE_SUCCESS = 'OKAY: TEST MESSAGE'
   TEST_SERIAL = 'TEST_SERIAL'
+
+  TEST_VAR = 'VAR1'
+
+  class TestError(sh.ErrorReturnCode):
+
+    def __init__(self):
+      pass
 
   def setUp(self):
     pass
@@ -54,7 +63,9 @@ class FastbootShTest(unittest.TestCase):
 
   @patch('sh.fastboot', create=True)
   def testListDevicesFailure(self, mock_fastboot_commands):
-    mock_fastboot_commands.return_value = self.TEST_MESSAGE_FAILURE
+    mock_error = self.TestError()
+    mock_error.stderr = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       fastbootsh.FastbootDevice.ListDevices()
       self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
@@ -65,20 +76,23 @@ class FastbootShTest(unittest.TestCase):
     mock_fastboot_commands.return_value = self.TEST_MESSAGE_SUCCESS
     command = 'TEST COMMAND'
     device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
-    message = device.Oem(command)
+    message = device.Oem(command, False)
     mock_fastboot_commands.assert_called_once_with('-s',
                                                    self.TEST_SERIAL,
                                                    'oem',
-                                                   command)
+                                                   command,
+                                                   _err_to_out=False)
     self.assertEqual(self.TEST_MESSAGE_SUCCESS, message)
 
   @patch('sh.fastboot', create=True)
   def testOemFailure(self, mock_fastboot_commands):
-    mock_fastboot_commands.return_value = self.TEST_MESSAGE_FAILURE
+    mock_error = self.TestError()
+    mock_error.stderr = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
     command = 'TEST COMMAND'
     device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
-      device.Oem(command)
+      device.Oem(command, False)
       self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
 
   # Test FastbootDevice.Upload
@@ -96,7 +110,9 @@ class FastbootShTest(unittest.TestCase):
 
   @patch('sh.fastboot', create=True)
   def testUploadFailure(self, mock_fastboot_commands):
-    mock_fastboot_commands.return_value = self.TEST_MESSAGE_FAILURE
+    mock_error = self.TestError()
+    mock_error.stderr = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
     command = 'TEST COMMAND'
     device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
@@ -118,12 +134,27 @@ class FastbootShTest(unittest.TestCase):
 
   @patch('sh.fastboot', create=True)
   def testDownloadFailure(self, mock_fastboot_commands):
-    mock_fastboot_commands.return_value = self.TEST_MESSAGE_FAILURE
+    mock_error = self.TestError()
+    mock_error.stderr = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
     command = 'TEST COMMAND'
     device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       device.Download(command)
       self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+
+  # Test FastbootDevice.GetVar
+  @patch('sh.fastboot', create=True)
+  def testGetVar(self, mock_fastboot_commands):
+    mock_fastboot_commands.return_value = self.TEST_VAR + ': ' + 'abcd'
+    device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
+    message = device.GetVar(self.TEST_VAR)
+    mock_fastboot_commands.assert_called_once_with('-s',
+                                                   self.TEST_SERIAL,
+                                                   'getvar',
+                                                   self.TEST_VAR,
+                                                   _err_to_out=True)
+    self.assertEqual('abcd', message)
 
 if __name__ == '__main__':
   unittest.main()
