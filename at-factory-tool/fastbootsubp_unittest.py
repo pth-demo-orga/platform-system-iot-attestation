@@ -1,9 +1,18 @@
-"""Unit test for fastboot interface using sh library."""
+"""Unit test for fastboot interface using subprocess library."""
 import unittest
+import subprocess
 
 import fastboot_exceptions
 import fastbootsubp
 from mock import patch
+
+CREATE_NO_WINDOW = 0x08000000
+
+
+class TestError(subprocess.CalledProcessError):
+
+  def __init__(self):
+    pass
 
 
 class FastbootSubpTest(unittest.TestCase):
@@ -11,6 +20,9 @@ class FastbootSubpTest(unittest.TestCase):
   TEST_MESSAGE_FAILURE = 'FAIL: TEST MESSAGE'
   TEST_MESSAGE_SUCCESS = 'OKAY: TEST MESSAGE'
   TEST_SERIAL = 'TEST_SERIAL'
+
+  TEST_VAR = 'VAR1'
+  TEST_MESSAGE = 'TEST MESSAGE'
 
   def setUp(self):
     pass
@@ -20,7 +32,8 @@ class FastbootSubpTest(unittest.TestCase):
   def testListDevicesOneDevice(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = self.TEST_SERIAL + '\tfastboot'
     device_serial_numbers = fastbootsubp.FastbootDevice.ListDevices()
-    mock_fastboot_commands.assert_called_once_with(['fastboot', 'devices'])
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', 'devices'], creationflags=CREATE_NO_WINDOW)
     self.assertEqual(1, len(device_serial_numbers))
     self.assertEqual(self.TEST_SERIAL, device_serial_numbers[0])
 
@@ -29,7 +42,8 @@ class FastbootSubpTest(unittest.TestCase):
     mock_fastboot_commands.return_value = (self.TEST_SERIAL + '\tfastboot\n' +
                                            self.ATFA_TEST_SERIAL + '\tfastboot')
     device_serial_numbers = fastbootsubp.FastbootDevice.ListDevices()
-    mock_fastboot_commands.assert_called_once_with(['fastboot', 'devices'])
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', 'devices'], creationflags=CREATE_NO_WINDOW)
     self.assertEqual(2, len(device_serial_numbers))
     self.assertEqual(self.TEST_SERIAL, device_serial_numbers[0])
     self.assertEqual(self.ATFA_TEST_SERIAL, device_serial_numbers[1])
@@ -42,19 +56,23 @@ class FastbootSubpTest(unittest.TestCase):
       result += '\n' + one_device
     mock_fastboot_commands.return_value = result
     device_serial_numbers = fastbootsubp.FastbootDevice.ListDevices()
-    mock_fastboot_commands.assert_called_once_with(['fastboot', 'devices'])
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', 'devices'], creationflags=CREATE_NO_WINDOW)
     self.assertEqual(10, len(device_serial_numbers))
 
   @patch('subprocess.check_output', create=True)
   def testListDevicesNone(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = ''
     device_serial_numbers = fastbootsubp.FastbootDevice.ListDevices()
-    mock_fastboot_commands.assert_called_once_with(['fastboot', 'devices'])
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', 'devices'], creationflags=CREATE_NO_WINDOW)
     self.assertEqual(0, len(device_serial_numbers))
 
   @patch('subprocess.check_output', create=True)
   def testListDevicesFailure(self, mock_fastboot_commands):
-    mock_fastboot_commands.return_value = self.TEST_MESSAGE_FAILURE
+    mock_error = TestError()
+    mock_error.output = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       fastbootsubp.FastbootDevice.ListDevices()
       self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
@@ -65,20 +83,33 @@ class FastbootSubpTest(unittest.TestCase):
     mock_fastboot_commands.return_value = self.TEST_MESSAGE_SUCCESS
     command = 'TEST COMMAND'
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
-    message = device.Oem(command)
-    mock_fastboot_commands.assert_called_once_with(['fastboot', '-s',
-                                                    self.TEST_SERIAL,
-                                                    'oem',
-                                                    command])
+    message = device.Oem(command, False)
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', '-s', self.TEST_SERIAL, 'oem', command],
+        creationflags=CREATE_NO_WINDOW)
+    self.assertEqual(self.TEST_MESSAGE_SUCCESS, message)
+
+  @patch('subprocess.check_output', create=True)
+  def testOemErrToOut(self, mock_fastboot_commands):
+    mock_fastboot_commands.return_value = self.TEST_MESSAGE_SUCCESS
+    command = 'TEST COMMAND'
+    device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
+    message = device.Oem(command, True)
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', '-s', self.TEST_SERIAL, 'oem', command],
+        stderr=subprocess.STDOUT,
+        creationflags=CREATE_NO_WINDOW)
     self.assertEqual(self.TEST_MESSAGE_SUCCESS, message)
 
   @patch('subprocess.check_output', create=True)
   def testOemFailure(self, mock_fastboot_commands):
-    mock_fastboot_commands.return_value = self.TEST_MESSAGE_FAILURE
+    mock_error = TestError()
+    mock_error.output = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
     command = 'TEST COMMAND'
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
-      device.Oem(command)
+      device.Oem(command, False)
       self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
 
   # Test FastbootDevice.Upload
@@ -88,15 +119,16 @@ class FastbootSubpTest(unittest.TestCase):
     command = 'TEST COMMAND'
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
     message = device.Upload(command)
-    mock_fastboot_commands.assert_called_once_with(['fastboot', '-s',
-                                                    self.TEST_SERIAL,
-                                                    'get_staged',
-                                                    command])
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', '-s', self.TEST_SERIAL, 'get_staged', command],
+        creationflags=CREATE_NO_WINDOW)
     self.assertEqual(self.TEST_MESSAGE_SUCCESS, message)
 
   @patch('subprocess.check_output', create=True)
   def testUploadFailure(self, mock_fastboot_commands):
-    mock_fastboot_commands.return_value = self.TEST_MESSAGE_FAILURE
+    mock_error = TestError()
+    mock_error.output = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
     command = 'TEST COMMAND'
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
@@ -110,15 +142,41 @@ class FastbootSubpTest(unittest.TestCase):
     command = 'TEST COMMAND'
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
     message = device.Download(command)
-    mock_fastboot_commands.assert_called_once_with(['fastboot', '-s',
-                                                    self.TEST_SERIAL,
-                                                    'stage',
-                                                    command])
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', '-s', self.TEST_SERIAL, 'stage', command],
+        creationflags=CREATE_NO_WINDOW)
     self.assertEqual(self.TEST_MESSAGE_SUCCESS, message)
 
   @patch('subprocess.check_output', create=True)
   def testDownloadFailure(self, mock_fastboot_commands):
-    mock_fastboot_commands.return_value = self.TEST_MESSAGE_FAILURE
+    mock_error = TestError()
+    mock_error.output = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
+    command = 'TEST COMMAND'
+    device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
+    with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
+      device.Download(command)
+      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+
+  # Test FastbootDevice.GetVar
+  @patch('subprocess.check_output', create=True)
+  def testGetVar(self, mock_fastboot_commands):
+    mock_fastboot_commands.return_value = (
+        self.TEST_VAR + ': ' + self.TEST_MESSAGE)
+    device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
+    message = device.GetVar(self.TEST_VAR)
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', '-s', self.TEST_SERIAL, 'getvar', self.TEST_VAR],
+        stderr=subprocess.STDOUT,
+        shell=True,
+        creationflags=CREATE_NO_WINDOW)
+    self.assertEqual(self.TEST_MESSAGE, message)
+
+  @patch('subprocess.check_output', create=True)
+  def testGetVarFailure(self, mock_fastboot_commands):
+    mock_error = TestError()
+    mock_error.output = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
     command = 'TEST COMMAND'
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
