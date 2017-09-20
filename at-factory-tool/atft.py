@@ -123,6 +123,7 @@ class Atft(wx.Frame):
     # Indicate whether refresh is paused. We would pause the refresh during each
     # fastboot command because on Windows, a fastboot device would disappear
     # from fastboot devices while a command is issued.
+
     self.refresh_pause = False
 
     # 'fastboot devices' can only run sequentially, so we use this variable
@@ -170,6 +171,7 @@ class Atft(wx.Frame):
 
     # App Menu Options
     menu_clear_command = self.app_menu.Append(wx.ID_ANY, 'Clear Command Output')
+
     self.Bind(wx.EVT_MENU, self.OnClearCommandWindow, menu_clear_command)
 
     self.menu_shst = self.app_menu.Append(
@@ -195,9 +197,9 @@ class Atft(wx.Frame):
 
     # ATFA Menu Options
     menu_atfa_status = self.atfa_menu.Append(wx.ID_ANY, 'ATFA Status')
-
     menu_key_threshold = self.atfa_menu.Append(wx.ID_ANY,
                                                'Key Warning Threshold')
+    self.Bind(wx.EVT_MENU, self.OnCheckATFAStatus, menu_atfa_status)
 
     menu_reboot = self.atfa_menu.Append(wx.ID_ANY, 'Reboot')
     self.Bind(wx.EVT_MENU, self.OnReboot, menu_reboot)
@@ -207,7 +209,9 @@ class Atft(wx.Frame):
 
     # Key Management Menu Options
     menu_storekey = self.key_menu.Append(wx.ID_ANY, 'Store Key Bundle')
+    self.Bind(wx.EVT_MENU, self.OnStoreKey, menu_storekey)
     menu_processkey = self.key_menu.Append(wx.ID_ANY, 'Process Key Bundle')
+    self.Bind(wx.EVT_MENU, self.OnProcessKey, menu_processkey)
 
     self.SetMenuBar(self.menubar)
 
@@ -219,29 +223,30 @@ class Atft(wx.Frame):
     # -> 'Clear Command Output'
     self.toolbar = self.CreateToolBar()
     self.tools = []
-    toolbar_auto_provision = self.toolbar.AddCheckTool(self.ID_TOOL_PROVISION,
-                                                       'Automatic Provision',
-                                                       wx.Bitmap('rocket.png'))
+    toolbar_auto_provision = self.toolbar.AddCheckTool(
+        self.ID_TOOL_PROVISION, 'Automatic Provision', wx.Bitmap('rocket.png'))
     self.toolbar_auto_provision = toolbar_auto_provision
 
-    toolbar_refresh = self.toolbar.AddTool(wx.ID_ANY, 'Refresh Devices',
-                                           wx.Bitmap('cw.png'))
+    toolbar_refresh = self.toolbar.AddTool(
+        wx.ID_ANY, 'Refresh Devices', wx.Bitmap('cw.png'))
     self.Bind(wx.EVT_TOOL, self.OnListDevices, toolbar_refresh)
 
-    toolbar_manual_prov = self.toolbar.AddTool(wx.ID_ANY, 'Manual Provision',
-                                               wx.Bitmap('download.png'))
+    toolbar_manual_prov = self.toolbar.AddTool(
+        wx.ID_ANY, 'Manual Provision', wx.Bitmap('download.png'))
 
-    toolbar_atfa_status = self.toolbar.AddTool(wx.ID_ANY, 'ATFA Status',
-                                               wx.Bitmap('pie-chart.png'))
+    toolbar_atfa_status = self.toolbar.AddTool(
+        wx.ID_ANY, 'ATFA Status', wx.Bitmap('pie-chart.png'))
+    self.Bind(wx.EVT_TOOL, self.OnCheckATFAStatus, toolbar_atfa_status)
 
-    toolbar_clear_command = self.toolbar.AddTool(self.ID_TOOL_CLEAR,
-                                                 'Clear Command Output',
-                                                 wx.Bitmap('eraser.png'))
+    toolbar_clear_command = self.toolbar.AddTool(
+        self.ID_TOOL_CLEAR, 'Clear Command Output', wx.Bitmap('eraser.png'))
     self.Bind(wx.EVT_TOOL, self.OnClearCommandWindow, toolbar_clear_command)
 
     self.tools.append(toolbar_auto_provision)
     self.tools.append(toolbar_refresh)
     self.tools.append(toolbar_manual_prov)
+    self.tools.append(toolbar_atfa_status)
+    self.tools.append(toolbar_clear_command)
     self.tools.append(toolbar_atfa_status)
     self.tools.append(toolbar_clear_command)
 
@@ -336,6 +341,16 @@ class Atft(wx.Frame):
 
     self._CreateBindEvents()
     self.StartRefreshingDevices()
+
+  def PauseRefresh(self):
+    """Pause the refresh for device list during fastboot operations.
+    """
+    self.refresh_pause = True
+
+  def ResumeRefresh(self):
+    """Resume the refresh for device list.
+    """
+    self.refresh_pause = False
 
   def PrintToWindow(self, text_entry, text, append=False):
     """Print some message to a text_entry window.
@@ -451,6 +466,15 @@ class Atft(wx.Frame):
       self.target_dev_toggle_sort.SetLabel(self.SORT_BY_SERIAL_TEXT)
     self._ListDevices()
 
+  def OnCheckATFAStatus(self, event):
+    """Check the attestation key status from ATFA device asynchronously.
+
+    Args:
+      event: The triggering event.
+    """
+    operation = 'Check ATFA status'
+    self._CreateThread(self._CheckATFAStatus, operation)
+
   def OnQuit(self, event):
     """Quit the application.
 
@@ -480,6 +504,23 @@ class Atft(wx.Frame):
       self.toolbar.Show()
     else:
       self.toolbar.Hide()
+
+  def OnStoreKey(self, event):
+    """Store the keybundle to the ATFA device.
+
+    Args:
+      event: The button click event.
+    """
+    self.OnStorageMode(event)
+
+  def OnProcessKey(self, event):
+    """The async operation to ask ATFA device to process the stored keybundle.
+
+    Args:
+      event: The button click event.
+    """
+    operation = 'ATFA device process key bundle'
+    self._CreateThread(self._ProcessKey, operation)
 
   def ShowAlert(self, msg):
     """Show an alert box at the center of the parent window.
@@ -667,7 +708,7 @@ class Atft(wx.Frame):
     """List fastboot devices.
     """
 
-    # We need to check the lock to prevent two listdevices running at the same
+    # We need to check the lock to prevent two _ListDevices running at the same
     # time.
     if self.listing_device_lock.acquire(False):
       operation = 'List Devices'
@@ -680,21 +721,53 @@ class Atft(wx.Frame):
         # 'Release the lock'.
         self.listing_device_lock.release()
 
+  def _CheckATFAStatus(self, operation):
+    """Get the attestation key status from ATFA device.
+
+    Args:
+      operation: The operation's name
+    """
+
+    self._SendOperationStartEvent(operation)
+    self.PauseRefresh()
+
+    try:
+      keys_left = self.atft_manager.atfa_dev_manager.CheckStatus()
+    except (fastboot_exceptions.DeviceNotFoundException,
+            fastboot_exceptions.ProductNotSpecifiedException) as e:
+      self._HandleException(e, operation)
+      return
+    finally:
+      self.ResumeRefresh()
+
+    self._SendOperationSucceedEvent(operation)
+    self._SendAlertEvent(
+        'There are ' + str(keys_left) + ' keys left '
+        'for this product in the ATFA device.')
+
   def _SwitchStorageMode(self, operation):
     """Switch ATFA device to storage mode.
 
     Args:
       operation: The associated operation description.
     """
+
+    self._SendOperationStartEvent(operation)
+    self.PauseRefresh()
+
     try:
-      self._SendOperationStartEvent(operation)
       self.atft_manager.atfa_dev_manager.SwitchStorage()
-      self._SendOperationSucceedEvent(operation)
     except fastboot_exceptions.DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException(e, operation)
+      return
     except fastboot_exceptions.FastbootFailure as e:
       self._HandleException(e, operation, self.atft_manager.atfa_dev)
+      return
+    finally:
+      self.ResumeRefresh()
+
+    self._SendOperationSucceedEvent(operation)
 
   def _Reboot(self, operation):
     """Reboot ATFA device.
@@ -702,15 +775,22 @@ class Atft(wx.Frame):
     Args:
       operation: The associated operation description.
     """
+    self._SendOperationStartEvent(operation)
+    self.PauseRefresh()
+
     try:
-      self._SendOperationStartEvent(operation)
       self.atft_manager.atfa_dev_manager.Reboot()
-      self._SendOperationSucceedEvent(operation)
     except fastboot_exceptions.DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException(e, operation)
+      return
     except fastboot_exceptions.FastbootFailure as e:
       self._HandleException(e, operation, self.atft_manager.atfa_dev)
+      return
+    finally:
+      self.ResumeRefresh()
+
+    self._SendOperationSucceedEvent(operation)
 
   def _Shutdown(self, operation):
     """Shutdown ATFA device.
@@ -718,15 +798,22 @@ class Atft(wx.Frame):
     Args:
       operation: The associated operation description.
     """
+    self._SendOperationStartEvent(operation)
+    self.PauseRefresh()
+
     try:
-      self._SendOperationStartEvent(operation)
       self.atft_manager.atfa_dev_manager.Shutdown()
-      self._SendOperationSucceedEvent(operation)
     except fastboot_exceptions.DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException(e, operation)
+      return
     except fastboot_exceptions.FastbootFailure as e:
       self._HandleException(e, operation, self.atft_manager.atfa_dev)
+      return
+    finally:
+      self.ResumeRefresh()
+
+    self._SendOperationSucceedEvent(operation)
 
   def _GetSelectedTargets(self):
     """Get the list of target device that are selected in the device list.
@@ -748,9 +835,32 @@ class Atft(wx.Frame):
       selected_serials.append(serial)
     return selected_serials
 
+  def _ProcessKey(self, operation):
+    """Ask ATFA device to process the stored keybundle.
+
+    Args:
+      operation: The operation's name.
+    """
+    self._SendOperationStartEvent(operation)
+    self.PauseRefresh()
+
+    try:
+      self.atft_manager.atfa_dev_manager.ProcessKey()
+    except fastboot_exceptions.DeviceNotFoundException as e:
+      e.SetMsg('No Available ATFA!')
+      self._HandleException(e, operation)
+      return
+    except (fastboot_exceptions.FastbootFailure,
+            fastboot_exceptions.ProductNotSpecifiedException) as e:
+      self._HandleException(e, operation)
+      return
+    finally:
+      self.ResumeRefresh()
+
+    self._SendOperationSucceedEvent(operation)
+
 
 def main():
-  # TODO(matta): Check if there's a atft.py already running and not run again
   app = wx.App()
   Atft(None)
   app.MainLoop()
