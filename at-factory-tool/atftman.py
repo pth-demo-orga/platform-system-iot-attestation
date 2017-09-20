@@ -4,6 +4,7 @@
 This module provides the logical implementation of the graphical tool for
 managing the ATFA and AT communication.
 """
+import datetime
 import os
 import tempfile
 import uuid
@@ -305,9 +306,6 @@ class AtfaDeviceManager(object):
   def SwitchNormal(self):
     """Switch the ATFA device to normal mode.
 
-    TODO(matta): Find a way to find and nicely unmount drive from Windows.
-    TODO(matta): Have ATFA detect unmount and switch back to g_ser mode.
-
     Raises:
       DeviceNotFoundException: When the device is not found
     """
@@ -321,6 +319,17 @@ class AtfaDeviceManager(object):
     """
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     self.atft_manager.atfa_dev.Oem('storage')
+
+  def ProcessKey(self):
+    """Ask the ATFA device to process the stored key bundle.
+
+    Raises:
+      DeviceNotFoundException: When the device is not found
+    """
+    # Need to set time first so that certificates would validate.
+    self.SetTime()
+    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
+    self.atft_manager.atfa_dev.Oem('process-keybundle')
 
   def Reboot(self):
     """Reboot the ATFA device.
@@ -341,6 +350,43 @@ class AtfaDeviceManager(object):
     self.atft_manager.atfa_dev.Oem('shutdown')
 
   def GetLogs(self):
-    # TODO(matta): Add Fastboot command to copy logs to storage device and
     # switch to mass storage mode
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
+
+  def CheckStatus(self):
+    """Return the number of available AT keys for the current product.
+
+    Returns:
+      The number of attestation keys left for the current product.
+    Raises:
+      FastbootFailure: If error happens with the fastboot oem command.
+    """
+    if not self.atft_manager.product_id:
+      raise fastboot_exceptions.ProductNotSpecifiedException()
+
+    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
+    out = self.atft_manager.atfa_dev.Oem(
+        'num-keys ' + self.atft_manager.product_id, True)
+    # Note: use splitlines instead of split('\n') to prevent '\r\n' problem on
+    # windows.
+    for line in out.splitlines():
+      if line.startswith('(bootloader) '):
+        try:
+          return int(line.replace('(bootloader) ', ''))
+        except ValueError:
+          raise fastboot_exceptions.FastbootFailure(
+              'ATFA device response has invalid format')
+
+    raise fastboot_exceptions.FastbootFailure(
+        'ATFA device response has invalid format')
+
+  def SetTime(self):
+    """Inject the host time into the ATFA device.
+
+    Raises:
+      DeviceNotFoundException: When the device is not found
+    """
+    time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
+
+    self.atft_manager.atfa_dev.Oem('set-date ' + time)
