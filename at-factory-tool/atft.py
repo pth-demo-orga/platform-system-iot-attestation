@@ -189,6 +189,7 @@ class Atft(wx.Frame):
 
     # Key Provision Menu Options
     menu_manual_prov = self.provision_menu.Append(wx.ID_ANY, 'Provision Key')
+    self.Bind(wx.EVT_MENU, self.OnManualProvision, menu_manual_prov)
 
     # Audit Menu Options
     # TODO(shanyu): audit-related
@@ -225,6 +226,8 @@ class Atft(wx.Frame):
     self.tools = []
     toolbar_auto_provision = self.toolbar.AddCheckTool(
         self.ID_TOOL_PROVISION, 'Automatic Provision', wx.Bitmap('rocket.png'))
+    self.Bind(wx.EVT_TOOL, self.OnToggleAutoProv, toolbar_auto_provision)
+
     self.toolbar_auto_provision = toolbar_auto_provision
 
     toolbar_refresh = self.toolbar.AddTool(
@@ -233,6 +236,7 @@ class Atft(wx.Frame):
 
     toolbar_manual_prov = self.toolbar.AddTool(
         wx.ID_ANY, 'Manual Provision', wx.Bitmap('download.png'))
+    self.Bind(wx.EVT_TOOL, self.OnManualProvision, toolbar_manual_prov)
 
     toolbar_atfa_status = self.toolbar.AddTool(
         wx.ID_ANY, 'ATFA Status', wx.Bitmap('pie-chart.png'))
@@ -394,8 +398,12 @@ class Atft(wx.Frame):
                                          self.StartRefreshingDevices)
     self.refresh_timer.start()
 
-    # If refresh is not paused, refresh the devices.
-    if not self.refresh_pause:
+    if self.refresh_pause:
+      # If refresh is paused,
+      # still fire the dev_listed_event since status may change.
+      wx.QueueEvent(self, Event(self.dev_listed_event, -1))
+    else:
+      # If refresh is not paused, refresh the devices.
       self._ListDevices()
 
   def StopRefresh(self):
@@ -465,6 +473,62 @@ class Atft(wx.Frame):
       self.sort_by = self.atft_manager.SORT_BY_LOCATION
       self.target_dev_toggle_sort.SetLabel(self.SORT_BY_SERIAL_TEXT)
     self._ListDevices()
+
+  def OnToggleAutoProv(self, event):
+    """Enter auto provisioning mode.
+
+    Args:
+      event: The triggering event.
+    """
+    self.auto_prov = self.toolbar_auto_provision.IsToggled()
+    # If no available ATFA device.
+    if self.auto_prov and not self.atft_manager.atfa_dev:
+      self.auto_prov = False
+      self.toolbar.ToggleTool(self.ID_TOOL_PROVISION, False)
+      self._SendAlertEvent('Cannot enter auto provision mode\n'
+                           'No ATFA device available!')
+      return
+
+    # Disable all other buttons if entering auto mode.
+    for tool in self.tools:
+      tool_id = tool.GetId()
+      if (tool_id != self.ID_TOOL_PROVISION and
+          tool_id != self.ID_TOOL_CLEAR):
+        if self.auto_prov:
+          self.toolbar.EnableTool(tool_id, False)
+        else:
+          self.toolbar.EnableTool(tool_id, True)
+
+    # Disable menu items.
+    for i in range(1, 5):
+      if self.auto_prov:
+        self.menubar.EnableTop(i, False)
+      else:
+        self.menubar.EnableTop(i, True)
+
+    if self.auto_prov:
+      self.PrintToCommandWindow('Automatic key provisioning start')
+    else:
+      # Change all waiting devices' status to idle.
+      for device in self.atft_manager.target_devs:
+        if device.provision_status == atftman.ProvisionStatus.WAITING:
+          device.provision_status = atftman.ProvisionStatus.IDLE
+      self.PrintToCommandWindow('Automatic key provisioning end')
+
+  def OnManualProvision(self, event):
+    """Manual provision key asynchronously.
+
+    Args:
+      event: The triggering event.
+    """
+    selected_serials = self._GetSelectedTargets()
+    if not selected_serials:
+      self._SendAlertEvent("Can't Provision! No target device selected!")
+      return
+    if not self.atft_manager.atfa_dev:
+      self._SendAlertEvent("Can't Provision! No Available ATFA device!")
+      return
+    self._CreateThread(self._ManualProvision, selected_serials)
 
   def OnCheckATFAStatus(self, event):
     """Check the attestation key status from ATFA device asynchronously.
@@ -542,6 +606,30 @@ class Atft(wx.Frame):
     # Stop the refresh timer on close.
     self.StopRefresh()
     self.Destroy()
+
+  def _HandleAutoProv(self):
+    """Do the state transition for devices if in auto provisioning mode.
+
+    All idle devices -> waiting.
+    First waiting -> provisioning.
+    """
+
+    # All idle devices -> waiting.
+    running = False
+    for target_dev in self.atft_manager.target_devs:
+      if target_dev.provision_status == atftman.ProvisionStatus.IDLE:
+        target_dev.provision_status = atftman.ProvisionStatus.WAITING
+      if target_dev.provision_status == atftman.ProvisionStatus.PROVISIONING:
+        running = True
+        break
+
+    if not running:
+      # First waiting -> provisioning
+      for target_dev in self.atft_manager.target_devs:
+        if target_dev.provision_status == atftman.ProvisionStatus.WAITING:
+          target_dev.provision_status = atftman.ProvisionStatus.PROVISIONING
+          self._CreateThread(self._ProvisionTarget, target_dev)
+          break
 
   def _HandleException(self, e, operation=None, target=None):
     """Handle the exception.
@@ -668,6 +756,10 @@ class Atft(wx.Frame):
     Args:
       event: The event object.
     """
+    # If in auto provisioning mode, handle the newly added devices.
+    if self.auto_prov:
+      self._HandleAutoProv()
+
     if self.atft_manager.atfa_dev:
       atfa_message = str(self.atft_manager.atfa_dev)
     else:
@@ -686,9 +778,6 @@ class Atft(wx.Frame):
         self.target_devs_output.Append(
             (target_dev.serial_number, target_dev.location,
              target_dev.provision_status))
-    # If in auto provisioning mode, handle the newly added devices.
-    if self.auto_prov:
-      self._HandleAutoProv()
 
   def _CreateThread(self, target, *args):
     """Create and start a thread.
@@ -814,6 +903,55 @@ class Atft(wx.Frame):
       self.ResumeRefresh()
 
     self._SendOperationSucceedEvent(operation)
+
+  def _ManualProvision(self, selected_serials):
+    """Manual provision the selected devices.
+
+    Args:
+      selected_serials: A list of the serial numbers of the target devices.
+    """
+    target_devs = []
+    for serial in selected_serials:
+      target_dev = self.atft_manager.GetTargetDevice(serial)
+      if not target_dev:
+        continue
+      target_devs.append(target_dev)
+      if (target_dev.provision_status == atftman.ProvisionStatus.IDLE or
+          target_dev.provision_status == atftman.ProvisionStatus.FAILED):
+        target_dev.provision_status = atftman.ProvisionStatus.WAITING
+      else:
+        self._SendAlertEvent('Cannot provision device'
+                             ' that is already provisioning or provisioned!')
+    for target_dev in target_devs:
+      if target_dev.provision_status == atftman.ProvisionStatus.WAITING:
+        self._ProvisionTarget(target_dev)
+
+  def _ProvisionTarget(self, target):
+    """Provision the attestation key into the specific target.
+
+    Args:
+      target: The target to be provisioned.
+    """
+    operation = 'Attestation Key Provisioning'
+    self._SendOperationStartEvent(operation, target)
+    self.PauseRefresh()
+
+    try:
+      self.atft_manager.Provision(target)
+    except fastboot_exceptions.DeviceNotFoundException as e:
+      e.SetMsg('No Available ATFA!')
+      target.provision_status = atftman.ProvisionStatus.FAILED
+      self._HandleException(e, operation, target)
+      return
+    except fastboot_exceptions.FastbootFailure as e:
+      target.provision_status = atftman.ProvisionStatus.FAILED
+      self._HandleException(e, operation, target)
+      return
+    finally:
+      self.ResumeRefresh()
+
+    target.provision_status = atftman.ProvisionStatus.PROVISIONED
+    self._SendOperationSucceedEvent(operation, target)
 
   def _GetSelectedTargets(self):
     """Get the list of target device that are selected in the device list.
