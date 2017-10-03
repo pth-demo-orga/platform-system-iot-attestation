@@ -4,7 +4,7 @@
 This module provides the logical implementation of the graphical tool for
 managing the ATFA and AT communication.
 """
-import datetime
+from datetime import datetime
 import os
 import tempfile
 import uuid
@@ -13,11 +13,13 @@ import fastboot_exceptions
 
 
 class EncryptionAlgorithm(object):
+  """The support encryption algorithm constant."""
   ALGORITHM_P256 = 1
   ALGORITHM_CURVE25519 = 2
 
 
 class ProvisionStatus(object):
+  """The provision status constant."""
   IDLE = 'Idle'
   WAITING = 'Waiting'
   PROVISIONING = 'Provisioning'
@@ -132,6 +134,12 @@ class AtftManager(object):
     return device.location
 
   def _SortTargetDevices(self, sort_by):
+    """Sort the target device list according to sort_by field.
+
+    Args:
+      sort_by: The field to sort by, possible values are:
+        self.SORT_BY_LOCATION and self.SORT_BY_SERIAL.
+    """
     if sort_by == self.SORT_BY_LOCATION:
       self.target_devs.sort(key=AtftManager._LocationAsKey)
     elif sort_by == self.SORT_BY_SERIAL:
@@ -218,7 +226,7 @@ class AtftManager(object):
       target_dev: The target device (DeviceInfo).
     """
     at_attest_uuid = target_dev.GetVar('at-attest-uuid')
-    # TODO(shan): We only need empty string here
+    # TODO(shanyu): We only need empty string here
     # NOT_PROVISIONED is for test purpose.
     if at_attest_uuid and at_attest_uuid != 'NOT_PROVISIONED':
       target_dev.provision_status = ProvisionStatus.PROVISIONED
@@ -266,12 +274,88 @@ class AtftManager(object):
     Args:
       serial: The serial number for the device object.
     Returns:
-      The DeviceInfo object for the device.
+      The DeviceInfo object for the device. None if not exists.
     """
     for target_dev in self.target_devs:
       if target_dev.serial_number == serial:
         return target_dev
     return None
+
+  def Provision(self, target):
+    """Provision the key to the target device.
+
+    1. Get supported encryption algorithm
+    2. Send atfa-start-provisioning message to ATFA
+    3. Transfer content from ATFA to target
+    4. Send at-get-ca-request to target
+    5. Transfer content from target to ATFA
+    6. Send atfa-finish-provisioning message to ATFA
+    7. Transfer content from ATFA to target
+    8. Send at-set-ca-response message to target
+
+    Args:
+      target: The target device to be provisioned to.
+    """
+    atfa = self.atfa_dev
+    AtftManager.CheckDevice(atfa)
+    # Set the ATFA's time first.
+    self.atfa_dev_manager.SetTime()
+    algorithm_list = self._GetAlgorithmList(target)
+    algorithm = self._ChooseAlgorithm(algorithm_list)
+    # First half of the DH key exchange
+    atfa.Oem('atfa-start-provisioning ' + str(algorithm))
+    self.TransferContent(atfa, target)
+    # Second half of the DH key exchange
+    target.Oem('at-get-ca-request')
+    self.TransferContent(target, atfa)
+    # Encrypt and transfer key bundle
+    atfa.Oem('atfa-finish-provisioning')
+    self.TransferContent(atfa, target)
+    # Provision the key on device
+    target.Oem('at-set-ca-response')
+
+  def _GetAlgorithmList(self, target):
+    """Get the supported algorithm list.
+
+    Get the available algorithm list using getvar at-attest-dh
+    at_attest_dh should be in format 1:p256,2:curve25519
+    or 1:p256
+    or 2:curve25519.
+
+    Args:
+      target: The target device to check for supported algorithm.
+    Returns:
+      A list of available algorithms.
+      Options are ALGORITHM_P256 or ALGORITHM_CURVE25519
+    """
+    at_attest_dh = target.GetVar('at-attest-dh')
+    algorithm_strings = at_attest_dh.split(',')
+    algorithm_list = []
+    for algorithm_string in algorithm_strings:
+      algorithm_list.append(int(algorithm_string.split(':')[0]))
+    return algorithm_list
+
+  def _ChooseAlgorithm(self, algorithm_list):
+    """Choose the encryption algorithm to use for key provisioning.
+
+    We favor ALGORITHM_CURVE25519 over ALGORITHM_P256
+
+    Args:
+      algorithm_list: The list containing all available algorithms.
+    Returns:
+      The selected available algorithm
+    Raises:
+      NoAlgorithmAvailableException:
+        When there's no available valid algorithm to use.
+    """
+    if not algorithm_list:
+      raise fastboot_exceptions.NoAlgorithmAvailableException()
+    if EncryptionAlgorithm.ALGORITHM_CURVE25519 in algorithm_list:
+      return EncryptionAlgorithm.ALGORITHM_CURVE25519
+    elif EncryptionAlgorithm.ALGORITHM_P256 in algorithm_list:
+      return EncryptionAlgorithm.ALGORITHM_P256
+
+    raise fastboot_exceptions.NoAlgorithmAvailableException()
 
   @staticmethod
   def CheckDevice(device):
@@ -287,11 +371,15 @@ class AtftManager(object):
 
 
 class AtfaDeviceManager(object):
-  """The class to manager ATFA device related operations.
-
-  """
+  """The class to manager ATFA device related operations."""
 
   def __init__(self, atft_manager):
+    """Initiate the atfa device manager using the at-factory-tool manager.
+
+    Args:
+      atft_manager: The at-factory-tool manager that
+        includes this atfa device manager.
+    """
     self.atft_manager = atft_manager
 
   def GetSerial(self):
@@ -349,10 +437,6 @@ class AtfaDeviceManager(object):
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     self.atft_manager.atfa_dev.Oem('shutdown')
 
-  def GetLogs(self):
-    # switch to mass storage mode
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-
   def CheckStatus(self):
     """Return the number of available AT keys for the current product.
 
@@ -386,7 +470,6 @@ class AtfaDeviceManager(object):
     Raises:
       DeviceNotFoundException: When the device is not found
     """
-    time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-
+    time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     self.atft_manager.atfa_dev.Oem('set-date ' + time)
