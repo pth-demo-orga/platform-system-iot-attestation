@@ -427,6 +427,46 @@ class AtftManTest(unittest.TestCase):
     # we should have no temporary file at the end
     self.assertTrue(not files)
 
+  # Test AtftManager._ChooseAlgorithm
+  def testChooseAlgorithm(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper)
+    p256 = atftman.EncryptionAlgorithm.ALGORITHM_P256
+    curve = atftman.EncryptionAlgorithm.ALGORITHM_CURVE25519
+    algorithm = atft_manager._ChooseAlgorithm([p256, curve])
+    self.assertEqual(curve, algorithm)
+
+  def testChooseAlgorithmP256(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper)
+    p256 = atftman.EncryptionAlgorithm.ALGORITHM_P256
+    algorithm = atft_manager._ChooseAlgorithm([p256])
+    self.assertEqual(p256, algorithm)
+
+  def testChooseAlgorithmCurve(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper)
+    curve = atftman.EncryptionAlgorithm.ALGORITHM_CURVE25519
+    algorithm = atft_manager._ChooseAlgorithm([curve])
+    self.assertEqual(curve, algorithm)
+
+  def testChooseAlgorithmException(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper)
+    with self.assertRaises(fastboot_exceptions.NoAlgorithmAvailableException):
+      atft_manager._ChooseAlgorithm([])
+
+  # Test AtftManager._GetAlgorithmList
+  def testGetAlgorithmList(self):
+    mock_target = MagicMock()
+    mock_target.GetVar.return_value = '1:p256,2:curve25519'
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper)
+    algorithm_list = atft_manager._GetAlgorithmList(mock_target)
+    self.assertEqual(2, len(algorithm_list))
+    self.assertEqual(1, algorithm_list[0])
+    self.assertEqual(2, algorithm_list[1])
+
   # Test DeviceInfo.__eq__
   def testDeviceInfoEqual(self):
     test_device1 = atftman.DeviceInfo(None, self.TEST_SERIAL,
