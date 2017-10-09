@@ -25,7 +25,7 @@ class FastbootShTest(unittest.TestCase):
     pass
 
   # Test FastbootDevice.ListDevices
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testListDevicesOneDevice(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = self.TEST_SERIAL + '\tfastboot'
     device_serial_numbers = fastbootsh.FastbootDevice.ListDevices()
@@ -33,7 +33,7 @@ class FastbootShTest(unittest.TestCase):
     self.assertEqual(1, len(device_serial_numbers))
     self.assertEqual(self.TEST_SERIAL, device_serial_numbers[0])
 
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testListDevicesTwoDevices(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = (self.TEST_SERIAL + '\tfastboot\n' +
                                            self.ATFA_TEST_SERIAL + '\tfastboot')
@@ -43,7 +43,7 @@ class FastbootShTest(unittest.TestCase):
     self.assertEqual(self.TEST_SERIAL, device_serial_numbers[0])
     self.assertEqual(self.ATFA_TEST_SERIAL, device_serial_numbers[1])
 
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testListDevicesMultiDevices(self, mock_fastboot_commands):
     one_device = self.TEST_SERIAL + '\tfastboot'
     result = one_device
@@ -54,24 +54,24 @@ class FastbootShTest(unittest.TestCase):
     mock_fastboot_commands.assert_called_once_with('devices')
     self.assertEqual(10, len(device_serial_numbers))
 
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testListDevicesNone(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = ''
     device_serial_numbers = fastbootsh.FastbootDevice.ListDevices()
     mock_fastboot_commands.assert_called_once_with('devices')
     self.assertEqual(0, len(device_serial_numbers))
 
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testListDevicesFailure(self, mock_fastboot_commands):
     mock_error = self.TestError()
     mock_error.stderr = self.TEST_MESSAGE_FAILURE
     mock_fastboot_commands.side_effect = mock_error
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       fastbootsh.FastbootDevice.ListDevices()
-      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
   # Test FastbootDevice.Oem
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testOem(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = self.TEST_MESSAGE_SUCCESS
     command = 'TEST COMMAND'
@@ -84,7 +84,20 @@ class FastbootShTest(unittest.TestCase):
                                                    _err_to_out=False)
     self.assertEqual(self.TEST_MESSAGE_SUCCESS, message)
 
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
+  def testOemErrToOut(self, mock_fastboot_commands):
+    mock_fastboot_commands.return_value = self.TEST_MESSAGE_SUCCESS
+    command = 'TEST COMMAND'
+    device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
+    message = device.Oem(command, True)
+    mock_fastboot_commands.assert_called_once_with('-s',
+                                                   self.TEST_SERIAL,
+                                                   'oem',
+                                                   command,
+                                                   _err_to_out=True)
+    self.assertEqual(self.TEST_MESSAGE_SUCCESS, message)
+
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testOemFailure(self, mock_fastboot_commands):
     mock_error = self.TestError()
     mock_error.stderr = self.TEST_MESSAGE_FAILURE
@@ -93,10 +106,10 @@ class FastbootShTest(unittest.TestCase):
     device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       device.Oem(command, False)
-      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
   # Test FastbootDevice.Upload
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testUpload(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = self.TEST_MESSAGE_SUCCESS
     command = 'TEST COMMAND'
@@ -108,7 +121,7 @@ class FastbootShTest(unittest.TestCase):
                                                    command)
     self.assertEqual(self.TEST_MESSAGE_SUCCESS, message)
 
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testUploadFailure(self, mock_fastboot_commands):
     mock_error = self.TestError()
     mock_error.stderr = self.TEST_MESSAGE_FAILURE
@@ -117,10 +130,10 @@ class FastbootShTest(unittest.TestCase):
     device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       device.Upload(command)
-      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
   # Test FastbootDevice.Download
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testDownload(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = self.TEST_MESSAGE_SUCCESS
     command = 'TEST COMMAND'
@@ -132,7 +145,7 @@ class FastbootShTest(unittest.TestCase):
                                                    command)
     self.assertEqual(self.TEST_MESSAGE_SUCCESS, message)
 
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testDownloadFailure(self, mock_fastboot_commands):
     mock_error = self.TestError()
     mock_error.stderr = self.TEST_MESSAGE_FAILURE
@@ -141,10 +154,10 @@ class FastbootShTest(unittest.TestCase):
     device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       device.Download(command)
-      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
   # Test FastbootDevice.GetVar
-  @patch('sh.fastboot', create=True)
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
   def testGetVar(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = self.TEST_VAR + ': ' + 'abcd'
     device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
@@ -155,6 +168,35 @@ class FastbootShTest(unittest.TestCase):
                                                    self.TEST_VAR,
                                                    _err_to_out=True)
     self.assertEqual('abcd', message)
+
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
+  def testGetVarFailure(self, mock_fastboot_commands):
+    mock_error = self.TestError()
+    mock_error.stdout = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
+    device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
+    with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
+      device.GetVar(self.TEST_VAR)
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
+
+  # Test FastbootDevice.Reboot
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
+  def testReboot(self, mock_fastboot_commands):
+    device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
+    device.Reboot()
+    mock_fastboot_commands.assert_called_once_with('-s',
+                                                   self.TEST_SERIAL,
+                                                   'reboot-bootloader')
+
+  @patch('fastbootsh.FastbootDevice.fastboot_command', create=True)
+  def testRebootFailure(self, mock_fastboot_commands):
+    mock_error = self.TestError()
+    mock_error.stderr = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
+    device = fastbootsh.FastbootDevice(self.TEST_SERIAL)
+    with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
+      device.Reboot()
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
 if __name__ == '__main__':
   unittest.main()
