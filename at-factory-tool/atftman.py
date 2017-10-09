@@ -4,12 +4,21 @@
 This module provides the logical implementation of the graphical tool for
 managing the ATFA and AT communication.
 """
+import base64
 from datetime import datetime
+import json
 import os
 import tempfile
+import threading
 import uuid
 
-import fastboot_exceptions
+from fastboot_exceptions import DeviceNotFoundException
+from fastboot_exceptions import FastbootFailure
+from fastboot_exceptions import NoAlgorithmAvailableException
+from fastboot_exceptions import ProductAttributesFileFormatError
+from fastboot_exceptions import ProductNotSpecifiedException
+
+BOOTLOADER_STRING = '(bootloader) '
 
 
 class EncryptionAlgorithm(object):
@@ -20,11 +29,47 @@ class EncryptionAlgorithm(object):
 
 class ProvisionStatus(object):
   """The provision status constant."""
-  IDLE = 'Idle'
-  WAITING = 'Waiting'
-  PROVISIONING = 'Provisioning'
-  PROVISIONED = 'Provisioned'
-  FAILED = 'Provision Failed'
+  IDLE              = 'Idle'
+  WAITING           = 'Waiting'
+  FUSEVBOOT_ING     = 'Fusing Bootloader Vboot Key'
+  FUSEVBOOT_SUCCESS = 'Bootloader Locked'
+  FUSEVBOOT_FAILED  = 'Fuse Bootloader Vboot Key Failed'
+  REBOOT_ING        = 'Rebooting Device To Check Vboot Key'
+  REBOOT_SUCCESS    = 'Bootloader Verified Boot Checked'
+  REBOOT_FAILED     = 'Reboot Device Failed'
+  FUSEATTR_ING      = 'Fusing Permanent Attributes'
+  FUSEATTR_SUCCESS  = 'Permanent Attributes Fused'
+  FUSEATTR_FAILED   = 'Fuse Permanent Attributes Failed'
+  LOCKAVB_ING       = 'Locking Android Verified Boot'
+  LOCKAVB_SUCCESS   = 'Android Verified Boot Locked'
+  LOCKAVB_FAILED    = 'Lock Android Verified Boot Failed'
+  PROVISION_ING     = 'Provisioning Attestation Key'
+  PROVISION_SUCCESS = 'Attestation Key Provisioned'
+  PROVISION_FAILED  = 'Provision Attestation Key Failed'
+
+
+class ProvisionState(object):
+  """The provision state of the target device."""
+  bootloader_locked = False
+  avb_perm_attr_set = False
+  avb_locked = False
+  provisioned = False
+
+
+class ProductInfo(object):
+  """The information about a product.
+
+  Attributes:
+    product_id: The id for the product.
+    product_name: The name for the product.
+    product_attributes: The byte array of the product permanent attributes.
+  """
+
+  def __init__(self, product_id, product_name, product_attributes, vboot_key):
+    self.product_id = product_id
+    self.product_name = product_name
+    self.product_attributes = product_attributes
+    self.vboot_key = vboot_key
 
 
 class DeviceInfo(object):
@@ -35,15 +80,26 @@ class DeviceInfo(object):
     location: The physical USB location for the device.
   """
 
-  def __init__(self,
-               _fastboot_device_controller,
-               serial_number,
-               location=None,
-               provision_status=ProvisionStatus.IDLE):
+  def __init__(self, _fastboot_device_controller, serial_number,
+               location=None, provision_status=ProvisionStatus.IDLE,
+               provision_state=ProvisionState()):
     self._fastboot_device_controller = _fastboot_device_controller
     self.serial_number = serial_number
     self.location = location
+    # The provision status and provision state is only meaningful for target
+    # device.
     self.provision_status = provision_status
+    self.provision_state = provision_state
+    # The number of attestation keys left for the selected product. This
+    # attribute is only meaning for ATFA device.
+    self.keys_left = None
+
+  def Copy(self):
+    return DeviceInfo(None, self.serial_number, self.location,
+                      self.provision_status)
+
+  def Reboot(self):
+    return self._fastboot_device_controller.Reboot()
 
   def Oem(self, oem_command, err_to_out=False):
     return self._fastboot_device_controller.Oem(oem_command, err_to_out)
@@ -72,6 +128,42 @@ class DeviceInfo(object):
       return self.serial_number
 
 
+class RebootCallback(object):
+  """The class to handle reboot success and timeout callbacks."""
+
+  def __init__(self, timeout, success_callback, timeout_callback):
+    """Initiate a reboot callback handler class.
+
+    Args:
+      timeout: How much time to wait for the device to reappear.
+      success_callback: The callback to be called if the device reappear
+        before timeout.
+      timeout_callback: The callback to be called if the device doesn't reappear
+        before timeout.
+    """
+    self.success = success_callback
+    self.fail = timeout_callback
+    # Lock to make sure only one callback is called. (either success or timeout)
+    # This lock can only be obtained once.
+    self.lock = threading.Lock()
+    self.timer = threading.Timer(timeout, self._TimeoutCallback)
+    self.timer.start()
+
+  def _TimeoutCallback(self):
+    """The function to handle timeout callback.
+
+    Call the timeout_callback that is registered.
+    """
+    if self.lock.acquire(False):
+      self.fail()
+
+  def Release(self):
+    self.lock.release()
+    self.timer.cancel()
+    self.lock = None
+    self.timer = None
+
+
 class AtftManager(object):
   """The manager to implement ATFA tasks.
 
@@ -79,11 +171,20 @@ class AtftManager(object):
     atfa_dev: A FastbootDevice object identifying the detected ATFA device.
     target_dev: A FastbootDevice object identifying the AT device
       to be provisioned.
-    atfa_dev_manager: An interface to do operation on ATFA device.
   """
   SORT_BY_SERIAL = 0
   SORT_BY_LOCATION = 1
   DEFAULT_KEY_THRESHOLD = 100
+  # The length of the permanent attribute should be 1052.
+  EXPECTED_ATTRIBUTE_LENGTH = 1052
+
+  ATFA_REBOOT_TIMEOUT = 20
+
+  # The Permanent Attribute File JSON Key Names:
+  JSON_PRODUCT_NAME = 'productName'
+  JSON_PRODUCT_ATTRIBUTE = 'productPermanentAttribute'
+  JSON_PRODUCT_ATTRIBUTE = 'productPermanentAttribute'
+  JSON_VBOOT_KEY = 'bootloaderPublicKey'
 
   def __init__(self, fastboot_device_controller, serial_mapper):
     """Initialize attributes and store the supplied fastboot_device_controller.
@@ -94,21 +195,61 @@ class AtftManager(object):
       serial_mapper:
         The interface to get the USB physical location to serial number map.
     """
+    # The serial numbers for the devices that are at least seen twice.
     self.stable_serials = []
+    # The serail numbers for the devices that are only seen once.
     self.pending_serials = []
+    # The atfa device DeviceInfo object.
     self.atfa_dev = None
-    self.atfa_dev_manager = AtfaDeviceManager(self)
+    # The atfa device currently rebooting to set the os.
+    self._atfa_dev_setting = None
+    # The list of target devices DeviceInfo objects.
     self.target_devs = []
-    self.product_id = '00000000000000000000000000000000'
+    # The product information for the selected product.
+    self.product_info = None
+    # The key threshold, if the number of attestation key in the ATFA device
+    # is lower than this number, an alert would appear.
     self.key_threshold = self.DEFAULT_KEY_THRESHOLD
+     # The atfa device manager.
+    self._atfa_dev_manager = AtfaDeviceManager(self)
+    # The fastboot controller.
     self._fastboot_device_controller = fastboot_device_controller
+    # The map mapping serial number to USB location.
     self._serial_mapper = serial_mapper()
+    # The map mapping rebooting device serial number to their reboot callback
+    # objects.
+    self._reboot_callbacks = {}
+
+    self._atfa_reboot_lock = threading.Lock()
+
+  def GetATFAKeysLeft(self):
+    if not self.atfa_dev:
+      return None
+    return self.atfa_dev.keys_left
+
+  def CheckATFAStatus(self):
+    return self._atfa_dev_manager.CheckStatus()
+
+  def SwitchATFAStorage(self):
+    if self._fastboot_device_controller.GetHostOs() == 'Windows':
+      # Only windows need to switch. For Linux the partition should already
+      # mounted.
+      self._atfa_dev_manager.SwitchStorage()
+
+  def RebootATFA(self):
+    return self._atfa_dev_manager.Reboot()
+
+  def ShutdownATFA(self):
+    return self._atfa_dev_manager.Shutdown()
+
+  def ProcessATFAKey(self):
+    return self._atfa_dev_manager.ProcessKey()
 
   def ListDevices(self, sort_by=SORT_BY_LOCATION):
     """Get device list.
 
-    Get the serial number of the ATFA device and the target device.
-    If the device does not exist, the returned serial number would be None.
+    Get the serial number of the ATFA device and the target device. If the
+    device does not exist, the returned serial number would be None.
 
     Args:
       sort_by: The field to sort by.
@@ -122,6 +263,7 @@ class AtftManager(object):
       return
     self._HandleSerials()
     self._SortTargetDevices(sort_by)
+    self._HandleRebootCallbacks()
 
   @staticmethod
   def _SerialAsKey(device):
@@ -170,6 +312,26 @@ class AtftManager(object):
         # First seen, add to pending state.
         self.pending_serials.append(serial)
 
+  def _CheckAtfaSetOs(self):
+    """Check whether the ATFA device reappear after a 'set-os' command.
+
+    If it reappears, we create a new ATFA device object.
+    If not, something wrong happens, we need to clean the rebooting state.
+    """
+    atfa_serial = self._atfa_dev_setting.serial_number
+    if atfa_serial in self.stable_serials:
+      # We found the ATFA device again.
+      serial_location_map = self._serial_mapper.get_serial_map()
+      controller = self._fastboot_device_controller(atfa_serial)
+      location = None
+      if atfa_serial in serial_location_map:
+        location = serial_location_map[atfa_serial]
+      self.atfa_dev = DeviceInfo(controller, atfa_serial, location)
+
+    # Clean the state
+    self._atfa_dev_setting = None
+    self._atfa_reboot_lock.release()
+
   def _HandleSerials(self):
     """Create new devices and remove old devices.
 
@@ -192,12 +354,7 @@ class AtftManager(object):
       # No ATFA device found.
       self.atfa_dev = None
     elif self.atfa_dev is None or self.atfa_dev.serial_number != atfa_serial:
-      # Not the same ATFA device.
-      controller = self._fastboot_device_controller(atfa_serial)
-      location = None
-      if atfa_serial in serial_location_map:
-        location = serial_location_map[atfa_serial]
-      self.atfa_dev = DeviceInfo(controller, atfa_serial, location)
+      self._AddNewAtfa(atfa_serial)
 
     # Remove those devices that are not in new targets.
     self.target_devs = [
@@ -219,6 +376,112 @@ class AtftManager(object):
         self.CheckProvisionStatus(new_target_dev)
         self.target_devs.append(new_target_dev)
 
+  def _AddNewAtfa(self, atfa_serial):
+    """Create a new ATFA device object.
+
+    If the OS variable on the ATFA device is not the same as the host OS
+    version, we would use set the correct OS version.
+
+    Args:
+      atfa_serial: The serial number of the ATFA device to be added.
+    """
+    controller = self._fastboot_device_controller(atfa_serial)
+    serial_location_map = self._serial_mapper.get_serial_map()
+    location = None
+    if atfa_serial in serial_location_map:
+      location = serial_location_map[atfa_serial]
+    if self._atfa_reboot_lock.acquire(False):
+      # If there's not an atfa setting os already happening
+      self._atfa_dev_setting = DeviceInfo(controller, atfa_serial, location)
+      try:
+        atfa_os = self._GetOs(self._atfa_dev_setting)
+      except FastbootFailure:
+        # The device is not ready for get OS command, we just ignore the device.
+        self._atfa_reboot_lock.release()
+        return
+      host_os = controller.GetHostOs()
+      if atfa_os == host_os:
+        # The OS set for the ATFA is correct, we just create the new device.
+        self.atfa_dev = self._atfa_dev_setting
+        self._atfa_dev_setting = None
+        self._atfa_reboot_lock.release()
+      else:
+        # The OS set for the ATFA is not correct, need to set it.
+        try:
+          self._SetOs(self._atfa_dev_setting, host_os)
+          # SetOs include a rebooting process, but the device would not
+          # disappear from the device list immediately after the command.
+          # We would check if the ATFA reappear after ATFA_REBOOT_TIMEOUT.
+          timer = threading.Timer(
+              self.ATFA_REBOOT_TIMEOUT, self._CheckAtfaSetOs)
+          timer.start()
+        except FastbootFailure:
+          self._atfa_dev_setting = None
+          self._atfa_reboot_lock.release()
+
+  def _SetOs(self, target_dev, os_version):
+    """Change the os version on the target device.
+
+    Args:
+      target_dev: The target device.
+      os_version: The os version to set, options are 'Windows' or 'Linux'.
+    Raises:
+      FastbootFailure: when fastboot command fails.
+    """
+    target_dev.Oem('set-os ' + os_version)
+
+  def _GetOs(self, target_dev):
+    """Get the os version of the target device.
+
+    Args:
+      target_dev: The target deivce.
+    Returns:
+      The os version.
+    Raises:
+      FastbootFailure: when fastboot command fails.
+    """
+    output = target_dev.Oem('get-os', True)
+    if output and 'Linux' in output:
+      return 'Linux'
+    else:
+      return 'Windows'
+
+  def _HandleRebootCallbacks(self):
+    """Handle the callback functions after the reboot."""
+    success_serials = []
+    for serial in self._reboot_callbacks:
+      if serial in self.stable_serials:
+        if self._reboot_callbacks[serial].lock.acquire(False):
+          success_serials.append(serial)
+
+    for serial in success_serials:
+      target = self.GetTargetDevice(serial)
+      if target:
+        if target.provision_status == ProvisionStatus.FUSEVBOOT_SUCCESS:
+          target.provision_status = ProvisionStatus.REBOOT_SUCCESS
+        self._reboot_callbacks[serial].success()
+
+      if self.atfa_dev and self.atfa_dev.serial_number == serial:
+        self._reboot_callbacks[serial].success()
+
+  def _ParseStateString(self, state_string):
+    """Parse the string returned by 'at-vboot-state' to a key-value map.
+
+    Args:
+      state_string: The string returned by oem at-vboot-state command.
+
+    Returns:
+      A key-value map.
+    """
+    state_map = {}
+    lines = state_string.splitlines()
+    for line in lines:
+      if line.startswith(BOOTLOADER_STRING):
+        key_value = line.replace(BOOTLOADER_STRING, '').split(': ')
+        if len(key_value) == 2:
+          state_map[key_value[0]] = key_value[1]
+    return state_map
+
   def CheckProvisionStatus(self, target_dev):
     """Check whether the target device has been provisioned.
 
@@ -226,21 +489,48 @@ class AtftManager(object):
       target_dev: The target device (DeviceInfo).
     """
     at_attest_uuid = target_dev.GetVar('at-attest-uuid')
+    state_string = target_dev.GetVar('at-vboot-state')
+
+    target_dev.provision_status = ProvisionStatus.IDLE
+    target_dev.provision_state = ProvisionState()
+
+    status_set = False
+
     # TODO(shanyu): We only need empty string here
     # NOT_PROVISIONED is for test purpose.
     if at_attest_uuid and at_attest_uuid != 'NOT_PROVISIONED':
-      target_dev.provision_status = ProvisionStatus.PROVISIONED
+      target_dev.provision_status = ProvisionStatus.PROVISION_SUCCESS
+      status_set = True
+      target_dev.provision_state.provisioned = True
 
-  def GetAtfaSerial(self):
-    """Get the serial number for the ATFA device.
+    # state_string should be in format:
+    # (bootloader) bootloader-locked: 1
+    # (bootloader) bootloader-min-versions: -1,0,3
+    # (bootloader) avb-perm-attr-set: 1
+    # (bootloader) avb-locked: 0
+    # (bootloader) avb-unlock-disabled: 0
+    # (bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2
+    if not state_string:
+      return
+    state_map = self._ParseStateString(state_string)
+    if state_map.get('avb-locked') and state_map['avb-locked'] == '1':
+      if not status_set:
+        target_dev.provision_status = ProvisionStatus.LOCKAVB_SUCCESS
+        status_set = True
+      target_dev.provision_state.avb_locked = True
 
-    Returns:
-      The serial number for the ATFA device
-    Raises:
-      DeviceNotFoundException: When the device is not found
-    """
-    self.CheckDevice(self.atfa_dev)
-    return self.atfa_dev.serial_number
+    if (state_map.get('avb-perm-attr-set') and
+        state_map['avb-perm-attr-set'] == '1'):
+      if not status_set:
+        target_dev.provision_status = ProvisionStatus.FUSEATTR_SUCCESS
+        status_set = True
+      target_dev.provision_state.avb_perm_attr_set = True
+
+    if (state_map.get('bootloader-locked') and
+        state_map['bootloader-locked'] == '1'):
+      if not status_set:
+        target_dev.provision_status = ProvisionStatus.FUSEVBOOT_SUCCESS
+      target_dev.provision_state.bootloader_locked = True
 
   def TransferContent(self, src, dst):
     """Transfer content from a device to another device.
@@ -276,9 +566,10 @@ class AtftManager(object):
     Returns:
       The DeviceInfo object for the device. None if not exists.
     """
-    for target_dev in self.target_devs:
-      if target_dev.serial_number == serial:
-        return target_dev
+    for device in self.target_devs:
+      if device.serial_number == serial:
+        return device
+
     return None
 
   def Provision(self, target):
@@ -296,23 +587,154 @@ class AtftManager(object):
     Args:
       target: The target device to be provisioned to.
     """
-    atfa = self.atfa_dev
-    AtftManager.CheckDevice(atfa)
-    # Set the ATFA's time first.
-    self.atfa_dev_manager.SetTime()
-    algorithm_list = self._GetAlgorithmList(target)
-    algorithm = self._ChooseAlgorithm(algorithm_list)
-    # First half of the DH key exchange
-    atfa.Oem('atfa-start-provisioning ' + str(algorithm))
-    self.TransferContent(atfa, target)
-    # Second half of the DH key exchange
-    target.Oem('at-get-ca-request')
-    self.TransferContent(target, atfa)
-    # Encrypt and transfer key bundle
-    atfa.Oem('atfa-finish-provisioning')
-    self.TransferContent(atfa, target)
-    # Provision the key on device
-    target.Oem('at-set-ca-response')
+    try:
+      target.provision_status = ProvisionStatus.PROVISION_ING
+      atfa = self.atfa_dev
+      AtftManager.CheckDevice(atfa)
+      # Set the ATFA's time first.
+      self._atfa_dev_manager.SetTime()
+      algorithm_list = self._GetAlgorithmList(target)
+      algorithm = self._ChooseAlgorithm(algorithm_list)
+      # First half of the DH key exchange
+      atfa.Oem('atfa-start-provisioning ' + str(algorithm))
+      self.TransferContent(atfa, target)
+      # Second half of the DH key exchange
+      target.Oem('at-get-ca-request')
+      self.TransferContent(target, atfa)
+      # Encrypt and transfer key bundle
+      atfa.Oem('atfa-finish-provisioning')
+      self.TransferContent(atfa, target)
+      # Provision the key on device
+      target.Oem('at-set-ca-response')
+
+      # After a success provision, the status should be updated.
+      self.CheckProvisionStatus(target)
+      if not target.provision_state.provisioned:
+        raise FastbootFailure('Status not updated.')
+    except FastbootFailure as e:
+      target.provision_status = ProvisionStatus.PROVISION_FAILED
+      raise e
+
+  def FuseVbootKey(self, target):
+    """Fuse the verified boot key to the target device.
+
+    Args:
+      target: The target device.
+    """
+    if not self.product_info:
+      target.provision_status = ProvisionStatus.FUSEVBOOT_FAILED
+      raise ProductNotSpecifiedException
+
+    # Create a temporary file to store the vboot key.
+    target.provision_status = ProvisionStatus.FUSEVBOOT_ING
+    try:
+      temp_file = tempfile.NamedTemporaryFile(delete=False)
+      temp_file.write(self.product_info.vboot_key)
+      temp_file.close()
+      temp_file_name = temp_file.name
+      target.Download(temp_file_name)
+      # Delete the temporary file.
+      os.remove(temp_file_name)
+      target.Oem('fuse at-bootloader-vboot-key')
+
+      # After a success fuse, the status should be updated.
+      self.CheckProvisionStatus(target)
+      if not target.provision_state.bootloader_locked:
+        raise FastbootFailure('Status not updated.')
+    except FastbootFailure as e:
+      target.provision_status = ProvisionStatus.FUSEVBOOT_FAILED
+      raise e
+
+  def FusePermAttr(self, target):
+    """Fuse the permanent attributes to the target device.
+
+    Args:
+      target: The target device.
+    """
+    if not self.product_info:
+      target.provision_status = ProvisionStatus.FUSEATTR_FAILED
+      raise ProductNotSpecifiedException
+    try:
+      target.provision_status = ProvisionStatus.FUSEATTR_ING
+      temp_file = tempfile.NamedTemporaryFile(delete=False)
+      temp_file.write(self.product_info.product_attributes)
+      temp_file.close()
+      temp_file_name = temp_file.name
+      target.Download(temp_file_name)
+      os.remove(temp_file_name)
+      target.Oem('fuse at-perm-attr')
+
+      self.CheckProvisionStatus(target)
+      if not target.provision_state.avb_perm_attr_set:
+        raise FastbootFailure('Status not updated')
+
+    except FastbootFailure as e:
+      target.provision_status = ProvisionStatus.FUSEATTR_FAILED
+      raise e
+
+  def LockAvb(self, target):
+    """Lock the android verified boot for the target.
+
+    Args:
+      target: The target device.
+    """
+    try:
+      target.provision_status = ProvisionStatus.LOCKAVB_ING
+      target.Oem('at-lock-vboot')
+      self.CheckProvisionStatus(target)
+      if not target.provision_state.avb_locked:
+        raise FastbootFailure('Status not updated')
+    except FastbootFailure as e:
+      target.provision_status = ProvisionStatus.LOCKAVB_FAILED
+      raise e
+
+  def Reboot(self, target, timeout, success_callback, timeout_callback):
+    """Reboot the target device.
+
+    Args:
+      target: The target device.
+      timeout: The time out value.
+      success_callback: The callback function called when the device reboots
+        successfully.
+      timeout_callback: The callback function called when the device reboots
+        timeout.
+
+    The device would disappear from the list after reboot.
+    If we see the device again within timeout, call the success_callback,
+    otherwise call the timeout_callback.
+    """
+    target.provision_status = ProvisionStatus.REBOOT_ING
+    try:
+      target.Reboot()
+      serial = target.serial_number
+      reboot_callback = RebootCallback(
+          timeout,
+          self.RebootCallbackWrapper(success_callback, serial),
+          self.RebootCallbackWrapper(timeout_callback, serial))
+      self._reboot_callbacks[serial] = reboot_callback
+    except FastbootFailure as e:
+      target.provision_status = ProvisionStatus.REBOOT_FAILED
+      raise e
+
+  def RebootCallbackWrapper(self, callback, serial):
+    """This wrapper function wraps the original callback function.
+
+    Some clean up operations are added.
+    We need to remove the handler if callback is called.
+    We need to release the resource the handler requires.
+
+    Args:
+      callback: The original callback function.
+      serial: The serial number for the device.
+    Returns:
+      An extended callback function.
+    """
+    def RebootCallbackFunc(callback=callback, serial=serial):
+      callback()
+      self._reboot_callbacks[serial].Release()
+      del self._reboot_callbacks[serial]
+
+    return RebootCallbackFunc
 
   def _GetAlgorithmList(self, target):
     """Get the supported algorithm list.
@@ -349,13 +771,66 @@ class AtftManager(object):
         When there's no available valid algorithm to use.
     """
     if not algorithm_list:
-      raise fastboot_exceptions.NoAlgorithmAvailableException()
+      raise NoAlgorithmAvailableException()
     if EncryptionAlgorithm.ALGORITHM_CURVE25519 in algorithm_list:
       return EncryptionAlgorithm.ALGORITHM_CURVE25519
     elif EncryptionAlgorithm.ALGORITHM_P256 in algorithm_list:
       return EncryptionAlgorithm.ALGORITHM_P256
 
-    raise fastboot_exceptions.NoAlgorithmAvailableException()
+    raise NoAlgorithmAvailableException()
+
+  def ProcessProductAttributesFile(self, content):
+    """Process the product attributes file.
+
+    The file should follow the following JSON format:
+      {
+        "productName": "",
+        "productDescription": "",
+        "productConsoleId": "",
+        "productPermanentAttribute": "",
+        "bootloaderPublicKey": "",
+        "creationTime": ""
+      }
+
+    Args:
+      content: The content of the product attributes file.
+    Raises:
+      ProductAttributesFileFormatError: When the file format is wrong.
+    """
+    try:
+      file_object = json.loads(content)
+    except ValueError:
+      raise ProductAttributesFileFormatError(
+          'Wrong JSON format!')
+    product_name = file_object.get(self.JSON_PRODUCT_NAME)
+    attribute_string = file_object.get(self.JSON_PRODUCT_ATTRIBUTE)
+    vboot_key_string = file_object.get(self.JSON_VBOOT_KEY)
+    if not product_name or not attribute_string or not vboot_key_string:
+      raise ProductAttributesFileFormatError(
+          'Essential field missing!')
+    try:
+      attribute = base64.standard_b64decode(attribute_string)
+      attribute_array = bytearray(attribute)
+      if self.EXPECTED_ATTRIBUTE_LENGTH != len(attribute_array):
+        raise ProductAttributesFileFormatError(
+            'Incorrect permanent product attributes length')
+
+      # We only need the last 16 byte for product ID
+      # We store the hex representation of the product ID
+      product_id = self._ByteToHex(attribute_array[-16:])
+
+      vboot_key_array = bytearray(base64.standard_b64decode(vboot_key_string))
+
+    except TypeError:
+      raise ProductAttributesFileFormatError(
+          'Incorrect Base64 encoding for permanent product attributes')
+
+    self.product_info = ProductInfo(product_id, product_name, attribute_array,
+                                    vboot_key_array)
+
+  def _ByteToHex(self, byte_array):
+    """Transform a byte array into a hex string."""
+    return ''.join('{:02x}'.format(x) for x in byte_array)
 
   @staticmethod
   def CheckDevice(device):
@@ -367,7 +842,7 @@ class AtftManager(object):
       DeviceNotFoundException: When the device is not found
     """
     if device is None:
-      raise fastboot_exceptions.DeviceNotFoundException()
+      raise DeviceNotFoundException()
 
 
 class AtfaDeviceManager(object):
@@ -390,14 +865,6 @@ class AtfaDeviceManager(object):
     """
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     self.atft_manager.atfa_dev.Oem('serial')
-
-  def SwitchNormal(self):
-    """Switch the ATFA device to normal mode.
-
-    Raises:
-      DeviceNotFoundException: When the device is not found
-    """
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
 
   def SwitchStorage(self):
     """Switch the ATFA device to storage mode.
@@ -438,31 +905,36 @@ class AtfaDeviceManager(object):
     self.atft_manager.atfa_dev.Oem('shutdown')
 
   def CheckStatus(self):
-    """Return the number of available AT keys for the current product.
+    """Update the number of available AT keys for the current product.
 
-    Returns:
-      The number of attestation keys left for the current product.
+    Need to use GetKeysLeft() function to get the number of keys left. If some
+    error happens, keys_left would be set to -1 to prevent checking again.
+
     Raises:
       FastbootFailure: If error happens with the fastboot oem command.
     """
-    if not self.atft_manager.product_id:
-      raise fastboot_exceptions.ProductNotSpecifiedException()
+
+    if not self.atft_manager.product_info:
+      raise ProductNotSpecifiedException()
 
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
+    # -1 means some error happens.
+    self.atft_manager.atfa_dev.keys_left = -1
     out = self.atft_manager.atfa_dev.Oem(
-        'num-keys ' + self.atft_manager.product_id, True)
+        'num-keys ' + self.atft_manager.product_info.product_id, True)
     # Note: use splitlines instead of split('\n') to prevent '\r\n' problem on
     # windows.
     for line in out.splitlines():
       if line.startswith('(bootloader) '):
         try:
-          return int(line.replace('(bootloader) ', ''))
+          self.atft_manager.atfa_dev.keys_left = int(
+              line.replace('(bootloader) ', ''))
+          return
         except ValueError:
-          raise fastboot_exceptions.FastbootFailure(
+          raise FastbootFailure(
               'ATFA device response has invalid format')
 
-    raise fastboot_exceptions.FastbootFailure(
-        'ATFA device response has invalid format')
+    raise FastbootFailure('ATFA device response has invalid format')
 
   def SetTime(self):
     """Inject the host time into the ATFA device.
