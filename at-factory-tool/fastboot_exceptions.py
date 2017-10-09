@@ -33,4 +33,14 @@ class FastbootFailure(Exception):
 class ProductNotSpecifiedException(Exception):
 
   def __str__(self):
-    return 'Product Id Not Specified!'
+    return 'Product Attribute File Not Selected!'
+
+
+class ProductAttributesFileFormatError(Exception):
+
+  def __init__(self, msg):
+    Exception.__init__(self)
+    self.msg = msg
+
+  def __str__(self):
+    return self.msg
