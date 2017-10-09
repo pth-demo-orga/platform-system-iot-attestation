@@ -1,13 +1,25 @@
+# Copyright 2017 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Unit test for atft."""
 import unittest
 
 import atft
-
 from atftman import ProvisionStatus
 import fastboot_exceptions
 from mock import call
 from mock import MagicMock
-import fastboot_exceptions
 from mock import patch
 import wx
 
@@ -78,21 +90,19 @@ class AtftTest(unittest.TestCase):
     mock_atft.PrintToWindow = MagicMock()
     mock_atft._HandleKeysLeft = MagicMock()
     mock_atft.target_devs_output.Append.side_effect = self.AppendTargetDevice
-    (mock_atft.target_devs_output.
-     DeleteAllItems.side_effect) = self.DeleteAllItems
+    (mock_atft.target_devs_output.DeleteAllItems.side_effect
+    ) = self.DeleteAllItems
     mock_atft.atft_manager.target_devs = []
     mock_atft._DeviceListedEventHandler(None)
     mock_atft.atft_manager.target_devs = [self.test_dev1]
     mock_atft._DeviceListedEventHandler(None)
     mock_atft.target_devs_output.Append.assert_called_once()
     self.assertEqual(1, len(self.test_target_devs))
-    self.assertEqual(self.test_dev1.serial_number,
-                     self.test_target_devs[0][0])
+    self.assertEqual(self.test_dev1.serial_number, self.test_target_devs[0][0])
     mock_atft.atft_manager.target_devs = [self.test_dev1, self.test_dev2]
     mock_atft._DeviceListedEventHandler(None)
     self.assertEqual(2, len(self.test_target_devs))
-    self.assertEqual(self.test_dev2.serial_number,
-                     self.test_target_devs[1][0])
+    self.assertEqual(self.test_dev2.serial_number, self.test_target_devs[1][0])
     mock_atft.atft_manager.target_devs = [self.test_dev1, self.test_dev2]
     mock_atft.target_devs_output.Append.reset_mock()
     mock_atft._DeviceListedEventHandler(None)
@@ -105,8 +115,7 @@ class AtftTest(unittest.TestCase):
     mock_atft.atft_manager.target_devs = [self.test_dev2]
     mock_atft._DeviceListedEventHandler(None)
     self.assertEqual(1, len(self.test_target_devs))
-    self.assertEqual(self.test_dev2.serial_number,
-                     self.test_target_devs[0][0])
+    self.assertEqual(self.test_dev2.serial_number, self.test_target_devs[0][0])
     mock_atft.atft_manager.target_devs = []
     mock_atft._DeviceListedEventHandler(None)
     self.assertEqual(0, len(self.test_target_devs))
