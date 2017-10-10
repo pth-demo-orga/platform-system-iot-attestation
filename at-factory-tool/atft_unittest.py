@@ -539,8 +539,10 @@ class AtftTest(unittest.TestCase):
   def MockReboot(self, target, timeout, success, fail):
     success()
 
-  def testFuseVbootKey(self):
+  @patch('wx.QueueEvent')
+  def testFuseVbootKey(self, mock_queue_event):
     mock_atft = MockAtft()
+    mock_atft.dev_listed_event = MagicMock()
     mock_atft.PauseRefresh = MagicMock()
     mock_atft.ResumeRefresh = MagicMock()
     mock_atft._SendStartMessageEvent = MagicMock()
@@ -563,9 +565,12 @@ class AtftTest(unittest.TestCase):
     mock_atft._FuseVbootKey(serials)
     calls = [call(test_dev1), call(test_dev2)]
     mock_atft.atft_manager.FuseVbootKey.assert_has_calls(calls)
+    mock_queue_event.assert_called()
 
-  def testFuseVbootKeyExceptions(self):
+  @patch('wx.QueueEvent')
+  def testFuseVbootKeyExceptions(self, mock_queue_event):
     mock_atft = MockAtft()
+    mock_atft.dev_listed_event = MagicMock()
     mock_atft.PauseRefresh = MagicMock()
     mock_atft.ResumeRefresh = MagicMock()
     mock_atft._SendStartMessageEvent = MagicMock()
@@ -590,6 +595,7 @@ class AtftTest(unittest.TestCase):
         fastboot_exceptions.ProductNotSpecifiedException)
     mock_atft._FuseVbootKey(serials)
     self.assertEqual(2, mock_atft._HandleException.call_count)
+    mock_queue_event.assert_not_called()
 
     # Reset states.
     mock_atft._HandleException.reset_mock()
