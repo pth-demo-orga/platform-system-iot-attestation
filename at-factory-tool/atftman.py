@@ -192,7 +192,7 @@ class AtftManager(object):
   # The length of the permanent attribute should be 1052.
   EXPECTED_ATTRIBUTE_LENGTH = 1052
 
-  ATFA_REBOOT_TIMEOUT = 20
+  ATFA_REBOOT_TIMEOUT = 30
 
   # The Permanent Attribute File JSON Key Names:
   JSON_PRODUCT_NAME = 'productName'
@@ -270,14 +270,22 @@ class AtftManager(object):
     """
     # ListDevices returns a list of USBHandles
     device_serials = self._fastboot_device_controller.ListDevices()
+    self.UpdateDevices(device_serials)
+    self._SortTargetDevices(sort_by)
+    self._HandleRebootCallbacks()
+
+  def UpdateDevices(self, device_serials):
+    """Update device list.
+
+    Args:
+      device_serials: The device serial numbers.
+    """
     self._UpdateSerials(device_serials)
     if not self.stable_serials:
       self.target_devs = []
       self.atfa_dev = None
       return
     self._HandleSerials()
-    self._SortTargetDevices(sort_by)
-    self._HandleRebootCallbacks()
 
   @staticmethod
   def _SerialAsKey(device):
@@ -471,7 +479,8 @@ class AtftManager(object):
     for serial in success_serials:
       target = self.GetTargetDevice(serial)
       if target:
-        if target.provision_status == ProvisionStatus.FUSEVBOOT_SUCCESS:
+        if (target.provision_status == ProvisionStatus.FUSEVBOOT_SUCCESS or
+            target.provision_status == ProvisionStatus.FUSEVBOOT_ING):
           target.provision_status = ProvisionStatus.REBOOT_SUCCESS
         self._reboot_callbacks[serial].success()
 
@@ -721,11 +730,15 @@ class AtftManager(object):
     try:
       target.Reboot()
       serial = target.serial_number
+      # We assume after the reboot the device would disappear
+      del target
+      self.stable_serials.remove(serial)
       reboot_callback = RebootCallback(
           timeout,
           self.RebootCallbackWrapper(success_callback, serial),
           self.RebootCallbackWrapper(timeout_callback, serial))
       self._reboot_callbacks[serial] = reboot_callback
+
     except FastbootFailure as e:
       target.provision_status = ProvisionStatus.REBOOT_FAILED
       raise e

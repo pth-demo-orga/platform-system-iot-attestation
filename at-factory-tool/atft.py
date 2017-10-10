@@ -116,7 +116,7 @@ class Atft(wx.Frame):
   # The interval for device refresh.
   DEVICE_REFRESH_INTERVAL = 1.0
   # The timeout allow for a device to reboot.
-  REBOOT_TIMEOUT = 20.0
+  REBOOT_TIMEOUT = 60.0
 
   ID_TOOL_PROVISION = 1
   ID_TOOL_CLEAR = 2
@@ -1183,7 +1183,8 @@ class Atft(wx.Frame):
 
     Update the number of keys left for the selected product in the ATFA device.
 
-    Returns: Whether the check succeed or not.
+    Returns:
+      Whether the check succeed or not.
     """
     operation = 'Check ATFA status'
     self._SendOperationStartEvent(operation)
@@ -1207,7 +1208,6 @@ class Atft(wx.Frame):
   def _ShowATFAStatus(self):
     """Show the attestation key status of the ATFA device.
     """
-    operation = 'Check ATFA status'
     if self._CheckATFAStatus():
       self._SendAlertEvent(
           'There are ' + str(self.atft_manager.GetATFAKeysLeft()) +
@@ -1263,7 +1263,7 @@ class Atft(wx.Frame):
     operation = 'Verify bootloader locked, rebooting'
     self._SendOperationStartEvent(operation, target)
     success_msg = '{' + str(target) + '} ' + 'Reboot Succeed'
-    timeout_msg = '{' + str(target) + '} ' + 'Reboot Timeout!'
+    timeout_msg = '{' + str(target) + '} ' + 'Reboot Failed! Timeout!'
     reboot_lock = threading.Lock()
     reboot_lock.acquire()
 
@@ -1275,12 +1275,20 @@ class Atft(wx.Frame):
 
     # Reboot the device to verify the bootloader is locked.
     try:
+      target.provision_status = ProvisionStatus.REBOOT_ING
+      wx.QueueEvent(self, Event(self.dev_listed_event, wx.ID_ANY))
+
+      # Reboot would change device status, so we disable reading device status
+      # during reboot.
+      self.listing_device_lock.acquire()
       self.atft_manager.Reboot(
           target, self.REBOOT_TIMEOUT, LambdaSuccessCallback,
           LambdaTimeoutCallback)
     except FastbootFailure as e:
       self._HandleException(e, operation)
       return
+    finally:
+      self.listing_device_lock.release()
 
     # Wait until callback finishes. After the callback, reboot_lock would be
     # released.
@@ -1303,6 +1311,7 @@ class Atft(wx.Frame):
       msg: The message to be shown
       lock: The lock to indicate the callback is called.
     """
+    self._SendPrintEvent(msg)
     self._SendAlertEvent(msg)
     lock.release()
 

@@ -1131,7 +1131,7 @@ class AtftManTest(unittest.TestCase):
     mock_target = MagicMock()
     mock_target.serial_number = self.TEST_SERIAL
     timeout = 1
-    atft_manager.stable_serials.append(self.TEST_SERIAL)
+    atft_manager.stable_serials = [self.TEST_SERIAL]
     test_device = atftman.DeviceInfo(None, self.TEST_SERIAL, self.TEST_LOCATION)
     atft_manager.target_devs.append(test_device)
     mock_success = MagicMock()
@@ -1142,6 +1142,7 @@ class AtftManTest(unittest.TestCase):
     mock_timer.side_effect = self.mock_create_timer
 
     atft_manager.Reboot(mock_target, timeout, mock_success, mock_fail)
+    atft_manager.stable_serials = [self.TEST_SERIAL]
     atft_manager._HandleRebootCallbacks()
     # mock timeout event.
     self.mock_timer_instance.refresh()
@@ -1168,7 +1169,7 @@ class AtftManTest(unittest.TestCase):
     mock_timer.side_effect = self.mock_create_timer
 
     atft_manager.Reboot(mock_target, timeout, mock_success, mock_fail)
-    atft_manager.stable_serials.remove(self.TEST_SERIAL)
+    atft_manager.stable_serials = []
     atft_manager._HandleRebootCallbacks()
 
     # mock timeout event.
@@ -1196,7 +1197,7 @@ class AtftManTest(unittest.TestCase):
     mock_timer.side_effect = self.mock_create_timer
 
     atft_manager.Reboot(mock_target, timeout, mock_success, mock_fail)
-    atft_manager.stable_serials.remove(self.TEST_SERIAL)
+    atft_manager.stable_serials = []
      # mock timeout event.
     self.mock_timer_instance.refresh()
     # mock refresh event.
