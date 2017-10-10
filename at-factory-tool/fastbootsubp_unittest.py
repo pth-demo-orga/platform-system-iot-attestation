@@ -1,6 +1,20 @@
+# Copyright 2017 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Unit test for fastboot interface using subprocess library."""
-import unittest
 import subprocess
+import unittest
 
 import fastboot_exceptions
 import fastbootsubp
@@ -25,7 +39,7 @@ class FastbootSubpTest(unittest.TestCase):
   TEST_MESSAGE = 'TEST MESSAGE'
 
   def setUp(self):
-    pass
+    fastbootsubp.FastbootDevice.fastboot_command = 'fastboot'
 
   # Test FastbootDevice.ListDevices
   @patch('subprocess.check_output', create=True)
@@ -40,6 +54,17 @@ class FastbootSubpTest(unittest.TestCase):
   @patch('subprocess.check_output', create=True)
   def testListDevicesTwoDevices(self, mock_fastboot_commands):
     mock_fastboot_commands.return_value = (self.TEST_SERIAL + '\tfastboot\n' +
+                                           self.ATFA_TEST_SERIAL + '\tfastboot')
+    device_serial_numbers = fastbootsubp.FastbootDevice.ListDevices()
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', 'devices'], creationflags=CREATE_NO_WINDOW)
+    self.assertEqual(2, len(device_serial_numbers))
+    self.assertEqual(self.TEST_SERIAL, device_serial_numbers[0])
+    self.assertEqual(self.ATFA_TEST_SERIAL, device_serial_numbers[1])
+
+  @patch('subprocess.check_output', create=True)
+  def testListDevicesTwoDevicesCRLF(self, mock_fastboot_commands):
+    mock_fastboot_commands.return_value = (self.TEST_SERIAL + '\tfastboot\r\n' +
                                            self.ATFA_TEST_SERIAL + '\tfastboot')
     device_serial_numbers = fastbootsubp.FastbootDevice.ListDevices()
     mock_fastboot_commands.assert_called_once_with(
@@ -75,7 +100,7 @@ class FastbootSubpTest(unittest.TestCase):
     mock_fastboot_commands.side_effect = mock_error
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       fastbootsubp.FastbootDevice.ListDevices()
-      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
   # Test FastbootDevice.Oem
   @patch('subprocess.check_output', create=True)
@@ -110,7 +135,7 @@ class FastbootSubpTest(unittest.TestCase):
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       device.Oem(command, False)
-      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
   # Test FastbootDevice.Upload
   @patch('subprocess.check_output', create=True)
@@ -133,7 +158,7 @@ class FastbootSubpTest(unittest.TestCase):
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       device.Upload(command)
-      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
   # Test FastbootDevice.Download
   @patch('subprocess.check_output', create=True)
@@ -156,7 +181,7 @@ class FastbootSubpTest(unittest.TestCase):
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
       device.Download(command)
-      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
   # Test FastbootDevice.GetVar
   @patch('subprocess.check_output', create=True)
@@ -177,11 +202,29 @@ class FastbootSubpTest(unittest.TestCase):
     mock_error = TestError()
     mock_error.output = self.TEST_MESSAGE_FAILURE
     mock_fastboot_commands.side_effect = mock_error
-    command = 'TEST COMMAND'
     device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
     with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
-      device.Download(command)
-      self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e))
+      device.GetVar(self.TEST_VAR)
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
+
+  # Test FastbootDevice.Reboot
+  @patch('subprocess.check_output', create=True)
+  def testGetVar(self, mock_fastboot_commands):
+    device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
+    message = device.Reboot()
+    mock_fastboot_commands.assert_called_once_with(
+        ['fastboot', '-s', self.TEST_SERIAL, 'reboot-bootloader'],
+        creationflags=CREATE_NO_WINDOW)
+
+  @patch('subprocess.check_output', create=True)
+  def testGetVarFailure(self, mock_fastboot_commands):
+    mock_error = TestError()
+    mock_error.output = self.TEST_MESSAGE_FAILURE
+    mock_fastboot_commands.side_effect = mock_error
+    device = fastbootsubp.FastbootDevice(self.TEST_SERIAL)
+    with self.assertRaises(fastboot_exceptions.FastbootFailure) as e:
+      device.Reboot()
+    self.assertEqual(self.TEST_MESSAGE_FAILURE, str(e.exception))
 
 if __name__ == '__main__':
   unittest.main()
