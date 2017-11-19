@@ -104,21 +104,15 @@ class FastbootDevice(object):
     """
     try:
       self._lock.acquire()
-      if err_to_out:
-        return subprocess.check_output(
-            [
-                FastbootDevice.fastboot_command, '-s', self.serial_number,
-                'oem', oem_command
-            ],
-            stderr=subprocess.STDOUT,
-            creationflags=CREATE_NO_WINDOW)
-      else:
-        return subprocess.check_output(
-            [
-                FastbootDevice.fastboot_command, '-s', self.serial_number,
-                'oem', oem_command
-            ],
-            creationflags=CREATE_NO_WINDOW)
+      # We need to redirect the output no matter err_to_out is set
+      # So that FastbootFailure can catch the right error.
+      return subprocess.check_output(
+          [
+              FastbootDevice.fastboot_command, '-s', self.serial_number,
+              'oem', oem_command
+          ],
+          stderr=subprocess.STDOUT,
+          creationflags=CREATE_NO_WINDOW)
     except subprocess.CalledProcessError as e:
       raise fastboot_exceptions.FastbootFailure(e.output)
     finally:
