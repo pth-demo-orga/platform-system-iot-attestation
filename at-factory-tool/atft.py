@@ -20,7 +20,10 @@ locates Fastboot devices and can initiate communication between the ATFA and
 an Android Things device.
 """
 from datetime import datetime
+import math
+import os
 from sys import platform
+import tempfile
 import threading
 
 from atftman import AtftManager
@@ -82,6 +85,152 @@ class AtftException(Exception):
     return '{0}: {1}'.format(e.__class__.__name__, e)
 
 
+class AtftLog(object):
+  """The class to handle logging.
+
+  Logs would be created under LOG_DIR with the time stamp when the log is
+  created as file name. There would be at most LOG_FILE_NUMBER log files and
+  each log file size would be less than log_size/log_file_number, so the total
+  log size would less than log_size.
+  """
+
+  def __init__(self, log_dir, log_size, log_file_number):
+    """Initiate the AtftLog object.
+
+    This function would also write the first 'Program Start' log entry.
+
+    Args:
+      log_dir: The directory to store logs.
+      log_size: The maximum total size for all the log files.
+      log_file_number: The maximum number for log files.
+    """
+    if not os.path.exists(log_dir):
+      # If log directory does not exist, try to create it.
+      try:
+        os.mkdir(log_dir)
+      except IOError:
+        return
+    self.log_dir = log_dir
+    self.log_dir_file = None
+    self.file_size = 0
+    self.log_size = log_size
+    self.log_file_number = log_file_number
+    self.file_size_max = math.floor(self.log_size / self.log_file_number)
+    self.lock = threading.Lock()
+    # Create the first log file.
+    self._CreateLogFile()
+    self.Info('Program', 'Program start')
+
+  def Error(self, tag, string):
+    """Print an error message to the log.
+
+    Args:
+      tag: The tag for the message.
+      string: The error message.
+    """
+    self._Output('E', tag, string)
+
+  def Debug(self, tag, string):
+    """Print a debug message to the log.
+
+    Args:
+      tag: The tag for the message.
+      string: The debug message.
+    """
+    self._Output('D', tag, string)
+
+  def Warning(self, tag, string):
+    """Print a warning message to the log.
+
+    Args:
+      tag: The tag for the message.
+      string: The warning message.
+    """
+    self._Output('W', tag, string)
+
+  def Info(self, tag, string):
+    """Print an info message to the log.
+
+    Args:
+      tag: The tag for the message.
+      string: The info message.
+    """
+    self._Output('I', tag, string)
+
+  def _Output(self, code, tag, string):
+    """Output a line of message to the log file.
+
+    Args:
+      code: The log level.
+      tag: The log tag.
+      string: The log message.
+    """
+    time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    message = '[{0}] {1}/{2}: {3}'.format(
+        time, code, tag, string.replace('\n', '\t'))
+    if self.log_dir_file:
+      message += '\n'
+      with self.lock:
+        self._LimitSize(message)
+        with open(self.log_dir_file, 'a') as log_file:
+          log_file.write(message)
+          log_file.flush()
+
+  def _LimitSize(self, message):
+    """This function limits the total size of logs.
+
+    It would create a new log file if the log file is too large. If the total
+    number of log files is larger than threshold, then it would delete the
+    oldest log.
+
+    Args:
+      message: The log message about to be added.
+    """
+    file_size = os.path.getsize(self.log_dir_file)
+    if file_size + len(message) > self.file_size_max:
+      # If file size will exceed file_size_max, then create a new file and close
+      # the current one.
+      self._CreateLogFile()
+    log_files = []
+    for file_name in os.listdir(self.log_dir):
+      if (os.path.isfile(os.path.join(self.log_dir, file_name)) and
+          file_name.startswith('atft_log_')):
+        log_files.append(file_name)
+
+    if len(log_files) > self.log_file_number:
+      # If file number exceeds LOG_FILE_NUMBER, then delete the oldest file.
+      try:
+        log_files.sort()
+        oldest_file = os.path.join(self.log_dir, log_files[0])
+        os.remove(oldest_file)
+      except IOError:
+        pass
+
+  def _CreateLogFile(self):
+    """Create a new log file using timestamp as file name.
+    """
+    timestamp = int((datetime.now() - datetime(1970, 1, 1)).total_seconds())
+    log_file_name = 'atft_log_' + str(timestamp)
+    log_file_path = os.path.join(self.log_dir, log_file_name)
+    i = 1
+    while os.path.exists(log_file_path):
+      # If already exists, create another name, timestamp_1, timestamp_2, etc.
+      log_file_name_new = log_file_name + '_' + str(i)
+      log_file_path = os.path.join(self.log_dir, log_file_name_new)
+      i += 1
+    try:
+      log_file = open(log_file_path, 'w+')
+      log_file.close()
+      self.log_dir_file = log_file_path
+    except IOError:
+      self.log_dir_file = None
+
+  def __del__(self):
+    """Cleanup function. This would log the 'Program Exit' message.
+    """
+    self.Info('Program', 'Program exit')
+
+
 class Event(wx.PyCommandEvent):
   """The customized event class.
   """
@@ -113,6 +262,17 @@ class Atft(wx.Frame):
   ATFA and an Android Things device.
 
   """
+  # Logging directory
+  LOG_DIR = os.path.join(tempfile.gettempdir(), 'atft_log')
+  # Log size limitation in bytes, default value is 10M
+  LOG_SIZE = 10000000
+  # How many log file are allowed to exist. This controls how much of the log
+  # information would be deleted if the log size exceeds LOG_SIZE. For example,
+  # if LOG_SIZE is set to 1000 bytes, and LOG_FILE_NUMBER is set to 10, then
+  # each log would be at most 100 bytes. If the log size is more than 1000
+  # bytes, the oldest log file get deleted, which means 100 bytes of logs is
+  # lost.
+  LOG_FILE_NUMBER = 10
   # The interval for device refresh.
   DEVICE_REFRESH_INTERVAL = 1.0
   # The timeout allow for a device to reboot.
@@ -228,6 +388,11 @@ class Atft(wx.Frame):
     self.alert_lock = threading.Lock()
 
     self.InitializeUI()
+
+    # Log handler
+    self.log = AtftLog(self.LOG_DIR, self.LOG_SIZE, self.LOG_FILE_NUMBER)
+    if not self.log.log_dir_file:
+      self._SendAlertEvent('Failed to create log!')
 
   def InitializeUI(self):
     """Initialize the application UI."""
@@ -524,7 +689,6 @@ class Atft(wx.Frame):
     Args:
       text: The text to be printed.
     """
-    # TODO(shanyu): Write to log file.
     msg = '[' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '] '
     msg += text + '\n'
     self.PrintToWindow(self.cmd_output, msg, True)
@@ -641,14 +805,18 @@ class Atft(wx.Frame):
 
       # Reset the low key alert shown indicator
       self.low_key_alert_shown = False
-      self.PrintToCommandWindow('Automatic key provisioning start')
+      message = 'Automatic key provisioning start'
+      self.PrintToCommandWindow(message)
+      self.log.Info('Autoprov', message)
     else:
       # Leave auto provisioning mode.
       for device in self.atft_manager.target_devs:
         # Change all waiting devices' status to idle.
         if device.provision_status == ProvisionStatus.WAITING:
           device.provision_status = ProvisionStatus.IDLE
-      self.PrintToCommandWindow('Automatic key provisioning end')
+      message = 'Automatic key provisioning end'
+      self.PrintToCommandWindow(message)
+      self.log.Info('Autoprov', message)
 
   def _ToggleToolbarMenu(self, auto_prov):
     """Disable/Enable buttons and menu items while entering/leaving auto mode.
@@ -684,6 +852,9 @@ class Atft(wx.Frame):
       return
     if not self.atft_manager.atfa_dev:
       self._SendAlertEvent("Can't Provision! No Available ATFA device!")
+      return
+    if self.atft_manager.GetATFAKeysLeft() == 0:
+      self._SendAlertEvent("Can't Provision! No keys left!")
       return
     self._CreateThread(self._ManualProvision, selected_serials)
 
@@ -796,7 +967,7 @@ class Atft(wx.Frame):
       event: The triggering event.
     """
     message = 'Choose Product Attributes File'
-    wildcard = '*.json'
+    wildcard = '*.atpa'
     callback = self.ProcessProductAttributesFile
     data = self.SelectFileArg(message, wildcard, callback)
     event = Event(self.select_file_event, value=data)
@@ -920,7 +1091,7 @@ class Atft(wx.Frame):
       copy_list.append(dev.Copy())
     return copy_list
 
-  def _HandleException(self, e, operation=None, target=None):
+  def _HandleException(self, level, e, operation=None, target=None):
     """Handle the exception.
 
     Fires a exception event which would be handled in main thread. The exception
@@ -928,6 +1099,7 @@ class Atft(wx.Frame):
     associated operation and device object.
 
     Args:
+      level: The log level for the exception.
       e: The original exception.
       operation: The operation associated with this exception.
       target: The DeviceInfo object associated with this exception.
@@ -938,6 +1110,19 @@ class Atft(wx.Frame):
                       self.exception_event,
                       wx.ID_ANY,
                       value=str(atft_exception)))
+    self._LogException(level, atft_exception)
+
+  def _LogException(self, level, atft_exception):
+    """Log the exceptions.
+
+    Args:
+      level: The log level for this exception. 'E': error or 'W': warning.
+      atft_exception: The exception to be logged.
+    """
+    if level == 'E':
+      self.log.Error('OpException', str(atft_exception))
+    elif level == 'W':
+      self.log.Warning('OpException', str(atft_exception))
 
   def _CreateBindEvents(self):
     """Create customized events and bind them to the event handlers.
@@ -1016,6 +1201,7 @@ class Atft(wx.Frame):
       msg += '{' + str(target) + '} '
     msg += operation + ' Start'
     self._SendPrintEvent(msg)
+    self.log.Info('OpStart', msg)
 
   def _SendOperationSucceedEvent(self, operation, target=None):
     """Send an event to print an operation succeed message.
@@ -1029,6 +1215,7 @@ class Atft(wx.Frame):
       msg += '{' + str(target) + '} '
     msg += operation + ' Succeed'
     self._SendPrintEvent(msg)
+    self.log.Info('OpSucceed', msg)
 
   def _SendDeviceListedEvent(self):
     """Send an event to indicate device list is refreshed, need to refresh UI.
@@ -1060,15 +1247,6 @@ class Atft(wx.Frame):
       self.ShowAlert(msg)
       self.alert_lock.release()
 
-  def _MessageEventHandler(self, event):
-    """The handler to handle the event to display a message in the cmd output.
-
-    Args:
-      event: The message to be displayed.
-    """
-    msg = event.GetValue()
-    self.PrintToCmdWindow(msg)
-
   def _DeviceListedEventHandler(self, event):
     """Handles the device listed event and list the devices.
 
@@ -1098,14 +1276,13 @@ class Atft(wx.Frame):
       return
 
     # Update the stored target list. Need to make a deep copy instead of copying
-    # the reference
+    # the reference.
     self.last_target_list = self._CopyList(self.atft_manager.target_devs)
     self.target_devs_output.DeleteAllItems()
-    if self.atft_manager.target_devs:
-      for target_dev in self.atft_manager.target_devs:
-        self.target_devs_output.Append(
-            (target_dev.serial_number, target_dev.location,
-             target_dev.provision_status))
+    for target_dev in self.atft_manager.target_devs:
+      self.target_devs_output.Append(
+          (target_dev.serial_number, target_dev.location,
+           target_dev.provision_status))
 
   def _SelectFileEventHandler(self, event):
     """Show the select file window.
@@ -1170,7 +1347,7 @@ class Atft(wx.Frame):
       try:
         self.atft_manager.ListDevices(self.sort_by)
       except FastbootFailure as e:
-        self._HandleException(e, operation)
+        self._HandleException('W', e, operation)
         return
       finally:
         # 'Release the lock'.
@@ -1194,10 +1371,13 @@ class Atft(wx.Frame):
       self.atft_manager.CheckATFAStatus()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
-      self._HandleException(e, operation)
+      self._HandleException('W', e, operation)
       return False
-    except (ProductNotSpecifiedException, FastbootFailure) as e:
-      self._HandleException(e, operation)
+    except ProductNotSpecifiedException as e:
+      self._HandleException('W', e, operation)
+      return False
+    except FastbootFailure as e:
+      self._HandleException('E', e, operation)
       return False
     finally:
       self.ResumeRefresh()
@@ -1252,9 +1432,11 @@ class Atft(wx.Frame):
 
     try:
       self.atft_manager.FuseVbootKey(target)
-    except (ProductNotSpecifiedException, FastbootFailure) as e:
-      self._HandleException(e, operation)
+    except ProductNotSpecifiedException as e:
+      self._HandleException('W', e, operation)
       return
+    except FastbootFailure as e:
+      self._HandleException('E', e, operation)
     finally:
       self.ResumeRefresh()
 
@@ -1285,7 +1467,7 @@ class Atft(wx.Frame):
           target, self.REBOOT_TIMEOUT, LambdaSuccessCallback,
           LambdaTimeoutCallback)
     except FastbootFailure as e:
-      self._HandleException(e, operation)
+      self._HandleException('E', e, operation)
       return
     finally:
       self.listing_device_lock.release()
@@ -1302,6 +1484,7 @@ class Atft(wx.Frame):
       lock: The lock to indicate the callback is called.
     """
     self._SendPrintEvent(msg)
+    self.log.Info('OpSucceed', msg)
     lock.release()
 
   def _RebootTimeoutCallback(self, msg, lock):
@@ -1312,7 +1495,7 @@ class Atft(wx.Frame):
       lock: The lock to indicate the callback is called.
     """
     self._SendPrintEvent(msg)
-    self._SendAlertEvent(msg)
+    self.log.Error('OpException', msg)
     lock.release()
 
   def _FusePermAttr(self, selected_serials):
@@ -1354,8 +1537,11 @@ class Atft(wx.Frame):
 
     try:
       self.atft_manager.FusePermAttr(target)
-    except (ProductNotSpecifiedException, FastbootFailure) as e:
-      self._HandleException(e, operation)
+    except ProductNotSpecifiedException as e:
+      self._HandleException('W', e, operation)
+      return
+    except FastbootFailure as e:
+      self._HandleException('E', e, operation)
       return
     finally:
       self.ResumeRefresh()
@@ -1400,7 +1586,7 @@ class Atft(wx.Frame):
     try:
       self.atft_manager.LockAvb(target)
     except FastbootFailure as e:
-      self._HandleException(e, operation)
+      self._HandleException('E', e, operation)
       return
     finally:
       self.ResumeRefresh()
@@ -1417,7 +1603,7 @@ class Atft(wx.Frame):
 
     if self._CheckATFAStatus():
       keys_left = self.atft_manager.GetATFAKeysLeft()
-      if keys_left and keys_left >=0 and keys_left <= threshold:
+      if keys_left and keys_left >= 0 and keys_left <= threshold:
         # If the confirmed number is lower than threshold, fire low key event.
         self._SendLowKeyAlertEvent()
 
@@ -1432,10 +1618,10 @@ class Atft(wx.Frame):
       self.atft_manager.SwitchATFAStorage()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
-      self._HandleException(e, operation)
+      self._HandleException('W', e, operation)
       return
     except FastbootFailure as e:
-      self._HandleException(e, operation, self.atft_manager.atfa_dev)
+      self._HandleException('E', e, operation, self.atft_manager.atfa_dev)
       return
     finally:
       self.ResumeRefresh()
@@ -1453,10 +1639,10 @@ class Atft(wx.Frame):
       self.atft_manager.RebootATFA()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
-      self._HandleException(e, operation)
+      self._HandleException('W', e, operation)
       return
     except FastbootFailure as e:
-      self._HandleException(e, operation, self.atft_manager.atfa_dev)
+      self._HandleException('E', e, operation, self.atft_manager.atfa_dev)
       return
     finally:
       self.ResumeRefresh()
@@ -1474,10 +1660,10 @@ class Atft(wx.Frame):
       self.atft_manager.ShutdownATFA()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
-      self._HandleException(e, operation)
+      self._HandleException('W', e, operation)
       return
     except FastbootFailure as e:
-      self._HandleException(e, operation, self.atft_manager.atfa_dev)
+      self._HandleException('E', e, operation, self.atft_manager.atfa_dev)
       return
     finally:
       self.ResumeRefresh()
@@ -1523,12 +1709,12 @@ class Atft(wx.Frame):
       self.atft_manager.Provision(target)
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
-      self._HandleException(e, operation, target)
+      self._HandleException('W', e, operation, target)
       return
     except FastbootFailure as e:
-      self._HandleException(e, operation, target)
+      self._HandleException('E', e, operation, target)
       # If it fails, one key might also be used.
-      self._CheckLowKeyAlert()
+      self._CheckATFAStatus()
       return
     finally:
       self.ResumeRefresh()
@@ -1564,6 +1750,11 @@ class Atft(wx.Frame):
           break
       elif target.provision_status == ProvisionStatus.LOCKAVB_SUCCESS:
         self._ProvisionTarget(target)
+        if self.atft_manager.GetATFAKeysLeft() == 0:
+          # No keys left. If it's auto provisioning mode, exit.
+          self._SendAlertEvent('No keys left! Leave auto provisioning mode!')
+          self.toolbar.ToggleTool(self.ID_TOOL_PROVISION, False)
+          self.OnToggleAutoProv(None)
         if target.provision_status == ProvisionStatus.PROVISION_FAILED:
           break
       else:
@@ -1581,10 +1772,10 @@ class Atft(wx.Frame):
       self.atft_manager.ProcessATFAKey()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
-      self._HandleException(e, operation)
+      self._HandleException('W', e, operation)
       return
     except FastbootFailure as e:
-      self._HandleException(e, operation)
+      self._HandleException('E', e, operation)
       return
     finally:
       self.ResumeRefresh()

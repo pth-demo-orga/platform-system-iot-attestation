@@ -145,7 +145,8 @@ class DeviceInfo(object):
 class RebootCallback(object):
   """The class to handle reboot success and timeout callbacks."""
 
-  def __init__(self, timeout, success_callback, timeout_callback):
+  def __init__(
+      self, timeout, success_callback, timeout_callback):
     """Initiate a reboot callback handler class.
 
     Args:
@@ -168,14 +169,16 @@ class RebootCallback(object):
 
     Call the timeout_callback that is registered.
     """
-    if self.lock.acquire(False):
+    if self.lock and self.lock.acquire(False):
       self.fail()
 
   def Release(self):
-    self.lock.release()
-    self.timer.cancel()
+    lock = self.lock
+    timer = self.timer
     self.lock = None
     self.timer = None
+    lock.release()
+    timer.cancel()
 
 
 class AtftManager(object):
@@ -249,6 +252,8 @@ class AtftManager(object):
       # Only windows need to switch. For Linux the partition should already
       # mounted.
       self._atfa_dev_manager.SwitchStorage()
+    else:
+      self.CheckDevice(self.atfa_dev)
 
   def RebootATFA(self):
     return self._atfa_dev_manager.Reboot()
@@ -271,8 +276,8 @@ class AtftManager(object):
     # ListDevices returns a list of USBHandles
     device_serials = self._fastboot_device_controller.ListDevices()
     self.UpdateDevices(device_serials)
-    self._SortTargetDevices(sort_by)
     self._HandleRebootCallbacks()
+    self._SortTargetDevices(sort_by)
 
   def UpdateDevices(self, device_serials):
     """Update device list.
@@ -360,7 +365,6 @@ class AtftManager(object):
     Add device location information and target device provision status.
     """
     device_serials = self.stable_serials
-    serial_location_map = self._serial_mapper.get_serial_map()
     new_targets = []
     atfa_serial = None
     for serial in device_serials:
@@ -378,25 +382,39 @@ class AtftManager(object):
     elif self.atfa_dev is None or self.atfa_dev.serial_number != atfa_serial:
       self._AddNewAtfa(atfa_serial)
 
-    # Remove those devices that are not in new targets.
+    # Remove those devices that are not in new targets and not rebooting.
     self.target_devs = [
         device for device in self.target_devs
-        if device.serial_number in new_targets
+        if (device.serial_number in new_targets or
+            device.provision_status == ProvisionStatus.REBOOT_ING)
     ]
 
     common_serials = [device.serial_number for device in self.target_devs]
 
     # Create new device object for newly added devices.
+    serial_location_map = self._serial_mapper.get_serial_map()
     for serial in new_targets:
       if serial not in common_serials:
-        controller = self._fastboot_device_controller(serial)
-        location = None
-        if serial in serial_location_map:
-          location = serial_location_map[serial]
+        self._CreateNewTargetDevice(serial, serial_location_map)
 
-        new_target_dev = DeviceInfo(controller, serial, location)
-        self.CheckProvisionStatus(new_target_dev)
-        self.target_devs.append(new_target_dev)
+  def _CreateNewTargetDevice(
+      self, serial, serial_location_map, check_status=True):
+    """Create a new target device object.
+
+    Args:
+      serial: The serial number for the new target device.
+      serial_location_map: The serial location map.
+      check_status: Whether to check provision status for the target device.
+    """
+    controller = self._fastboot_device_controller(serial)
+    location = None
+    if serial in serial_location_map:
+      location = serial_location_map[serial]
+
+    new_target_dev = DeviceInfo(controller, serial, location)
+    if check_status:
+      self.CheckProvisionStatus(new_target_dev)
+    self.target_devs.append(new_target_dev)
 
   def _AddNewAtfa(self, atfa_serial):
     """Create a new ATFA device object.
@@ -473,19 +491,17 @@ class AtftManager(object):
     success_serials = []
     for serial in self._reboot_callbacks:
       if serial in self.stable_serials:
-        if self._reboot_callbacks[serial].lock.acquire(False):
+        callback_lock = self._reboot_callbacks[serial].lock
+        # Make sure the timeout callback would not be called at the same time.
+        if callback_lock and callback_lock.acquire(False):
           success_serials.append(serial)
 
+    serial_location_map = self._serial_mapper.get_serial_map()
     for serial in success_serials:
-      target = self.GetTargetDevice(serial)
-      if target:
-        if (target.provision_status == ProvisionStatus.FUSEVBOOT_SUCCESS or
-            target.provision_status == ProvisionStatus.FUSEVBOOT_ING):
-          target.provision_status = ProvisionStatus.REBOOT_SUCCESS
-        self._reboot_callbacks[serial].success()
-
-      if self.atfa_dev and self.atfa_dev.serial_number == serial:
-        self._reboot_callbacks[serial].success()
+      self._reboot_callbacks[serial].success()
+      self._CreateNewTargetDevice(serial, serial_location_map, False)
+      self.GetTargetDevice(serial).provision_status = (
+          ProvisionStatus.REBOOT_SUCCESS)
 
   def _ParseStateString(self, state_string):
     """Parse the string returned by 'at-vboot-state' to a key-value map.
@@ -726,13 +742,19 @@ class AtftManager(object):
     If we see the device again within timeout, call the success_callback,
     otherwise call the timeout_callback.
     """
-    target.provision_status = ProvisionStatus.REBOOT_ING
     try:
       target.Reboot()
       serial = target.serial_number
+      location = target.location
       # We assume after the reboot the device would disappear
+      self.target_devs.remove(target)
       del target
       self.stable_serials.remove(serial)
+      # Create a rebooting target device that only contains serial and location.
+      rebooting_target = DeviceInfo(None, serial, location)
+      rebooting_target.provision_status = ProvisionStatus.REBOOT_ING
+      self.target_devs.append(rebooting_target)
+
       reboot_callback = RebootCallback(
           timeout,
           self.RebootCallbackWrapper(success_callback, serial),
@@ -746,9 +768,10 @@ class AtftManager(object):
   def RebootCallbackWrapper(self, callback, serial):
     """This wrapper function wraps the original callback function.
 
-    Some clean up operations are added.
-    We need to remove the handler if callback is called.
-    We need to release the resource the handler requires.
+    Some clean up operations are added. We need to remove the handler if
+    callback is called. We need to release the resource the handler requires.
+    We also needs to remove the rebooting device from the target list since a
+    new device would be created if the device reboot successfully.
 
     Args:
       callback: The original callback function.
@@ -757,6 +780,10 @@ class AtftManager(object):
       An extended callback function.
     """
     def RebootCallbackFunc(callback=callback, serial=serial):
+      rebooting_dev = self.GetTargetDevice(serial)
+      if rebooting_dev:
+        self.target_devs.remove(rebooting_dev)
+        del rebooting_dev
       callback()
       self._reboot_callbacks[serial].Release()
       del self._reboot_callbacks[serial]
