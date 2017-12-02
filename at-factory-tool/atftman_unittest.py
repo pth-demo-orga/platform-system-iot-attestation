@@ -1126,27 +1126,42 @@ class AtftManTest(unittest.TestCase):
   @patch('threading.Timer')
   def testRebootSuccess(self, mock_timer):
     self.mock_timer_instance = None
-    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
-                                       self.mock_serial_mapper)
-    mock_target = MagicMock()
-    mock_target.serial_number = self.TEST_SERIAL
+    atft_manager = atftman.AtftManager(
+      self.FastbootDeviceTemplate, self.mock_serial_mapper)
     timeout = 1
     atft_manager.stable_serials = [self.TEST_SERIAL]
-    test_device = atftman.DeviceInfo(None, self.TEST_SERIAL, self.TEST_LOCATION)
+    mock_fastboot = MagicMock()
+    test_device = atftman.DeviceInfo(
+        mock_fastboot, self.TEST_SERIAL, self.TEST_LOCATION)
+
     atft_manager.target_devs.append(test_device)
     mock_success = MagicMock()
     mock_fail = MagicMock()
-    # Status would be checked after reboot. We assume it's in FUSEVBOOT_SUCCESS
-    atft_manager.CheckProvisionStatus = MagicMock()
-    atft_manager.CheckProvisionStatus.side_effect = self.MockSetFuseVbootSuccess
     mock_timer.side_effect = self.mock_create_timer
 
-    atft_manager.Reboot(mock_target, timeout, mock_success, mock_fail)
+    atft_manager.Reboot(test_device, timeout, mock_success, mock_fail)
+
+    # During the reboot, the status should be REBOOT_ING.
+    self.assertEqual(1, len(atft_manager.target_devs))
+    self.assertEqual(
+        ProvisionStatus.REBOOT_ING,
+        atft_manager.target_devs[0].provision_status)
+    self.assertEqual(
+        self.TEST_SERIAL, atft_manager.target_devs[0].serial_number)
+
+    # After the device reappear, the status should be REBOOT_SUCCESS.
     atft_manager.stable_serials = [self.TEST_SERIAL]
     atft_manager._HandleRebootCallbacks()
     # mock timeout event.
     self.mock_timer_instance.refresh()
 
+    self.assertEqual(1, len(atft_manager.target_devs))
+    self.assertEqual(
+        ProvisionStatus.REBOOT_SUCCESS,
+        atft_manager.target_devs[0].provision_status)
+    mock_fastboot.Reboot.assert_called_once()
+
+    # Success should be called, fail should not.
     mock_success.assert_called_once()
     mock_fail.assert_not_called()
 
@@ -1155,11 +1170,11 @@ class AtftManTest(unittest.TestCase):
     self.mock_timer_instance = None
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper)
-    mock_target = MagicMock()
-    mock_target.serial_number = self.TEST_SERIAL
     timeout = 1
     atft_manager.stable_serials.append(self.TEST_SERIAL)
-    test_device = atftman.DeviceInfo(None, self.TEST_SERIAL, self.TEST_LOCATION)
+    mock_fastboot = MagicMock()
+    test_device = atftman.DeviceInfo(
+        mock_fastboot, self.TEST_SERIAL, self.TEST_LOCATION)
     atft_manager.target_devs.append(test_device)
     mock_success = MagicMock()
     mock_fail = MagicMock()
@@ -1168,13 +1183,15 @@ class AtftManTest(unittest.TestCase):
     atft_manager.CheckProvisionStatus.side_effect = self.MockSetFuseVbootSuccess
     mock_timer.side_effect = self.mock_create_timer
 
-    atft_manager.Reboot(mock_target, timeout, mock_success, mock_fail)
+    atft_manager.Reboot(test_device, timeout, mock_success, mock_fail)
     atft_manager.stable_serials = []
+
     atft_manager._HandleRebootCallbacks()
 
     # mock timeout event.
     self.mock_timer_instance.refresh()
 
+    self.assertEqual(0, len(atft_manager.target_devs))
     mock_success.assert_not_called()
     mock_fail.assert_called_once()
 
@@ -1183,11 +1200,11 @@ class AtftManTest(unittest.TestCase):
     self.mock_timer_instance = None
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper)
-    mock_target = MagicMock()
-    mock_target.serial_number = self.TEST_SERIAL
     timeout = 1
     atft_manager.stable_serials.append(self.TEST_SERIAL)
-    test_device = atftman.DeviceInfo(None, self.TEST_SERIAL, self.TEST_LOCATION)
+    mock_fastboot = MagicMock()
+    test_device = atftman.DeviceInfo(
+        mock_fastboot, self.TEST_SERIAL, self.TEST_LOCATION)
     atft_manager.target_devs.append(test_device)
     mock_success = MagicMock()
     mock_fail = MagicMock()
@@ -1196,13 +1213,14 @@ class AtftManTest(unittest.TestCase):
     atft_manager.CheckProvisionStatus.side_effect = self.MockSetFuseVbootSuccess
     mock_timer.side_effect = self.mock_create_timer
 
-    atft_manager.Reboot(mock_target, timeout, mock_success, mock_fail)
+    atft_manager.Reboot(test_device, timeout, mock_success, mock_fail)
     atft_manager.stable_serials = []
      # mock timeout event.
     self.mock_timer_instance.refresh()
     # mock refresh event.
     atft_manager._HandleRebootCallbacks()
 
+    self.assertEqual(0, len(atft_manager.target_devs))
     mock_success.assert_not_called()
     mock_fail.assert_called_once()
 
