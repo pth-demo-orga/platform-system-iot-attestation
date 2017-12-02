@@ -47,7 +47,7 @@ elif sys.platform.startswith('win'):
 
 # If this is set to True, no prerequisites would be checked against manual
 # operation, such as you can do key provisioning before fusing the vboot key.
-TEST_MODE = True
+TEST_MODE = False
 
 
 class AtftException(Exception):
