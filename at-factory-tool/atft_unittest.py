@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Unit test for atft."""
+import types
 import unittest
 
 import atft
@@ -27,22 +28,27 @@ import wx
 class MockAtft(atft.Atft):
 
   def __init__(self):
-    atft.Atft.InitializeUI = MagicMock()
-    atft.Atft.__init__(self)
-    self.atft_manager = MagicMock()
+    self.InitializeUI = MagicMock()
+    self.StartRefreshingDevices = MagicMock()
+    self.ChooseProduct = MagicMock()
+    self.CreateAtftManager = MagicMock()
+    self.CreateAtftLog = MagicMock()
+    self.ParseConfigFile = self._MockParseConfig
     self._SendPrintEvent = MagicMock()
-    self.log = MagicMock()
+    atft.Atft.__init__(self)
 
   def _MockParseConfig(self):
-    self.self.ATFT_VERSION = 'vTest'
+    self.ATFT_VERSION = 'vTest'
     self.COMPATIBLE_ATFA_VERSION = 'v1'
     self.DEVICE_REFRESH_INTERVAL = 1.0
+    self.DEFAULT_KEY_THRESHOLD = 0
     self.LOG_DIR = 'test_log_dir'
     self.LOG_SIZE = 1000
     self.LOG_FILE_NUMBER = 2
     self.LANGUAGE = 'ENG'
     self.REBOOT_TIMEOUT = 1.0
     self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = '*.atpa'
+
     return {}
 
 
@@ -78,8 +84,10 @@ class AtftTest(unittest.TestCase):
 
   def setUp(self):
     self.test_target_devs = []
-    self.test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1)
-    self.test_dev2 = TestDeviceInfo(self.TEST_SERIAL2, self.TEST_LOCATION2)
+    self.test_dev1 = TestDeviceInfo(
+        self.TEST_SERIAL1, self.TEST_LOCATION1, ProvisionStatus.IDLE)
+    self.test_dev2 = TestDeviceInfo(
+        self.TEST_SERIAL2, self.TEST_LOCATION2, ProvisionStatus.IDLE)
     self.test_text_window = ''
     self.atfa_keys = None
     self.device_map = {}
@@ -203,6 +211,8 @@ class AtftTest(unittest.TestCase):
   @patch('wx.QueueEvent')
   def testStartRefreshingDevice(self, mock_queue_event, mock_timer):
     mock_atft = MockAtft()
+    mock_atft.StartRefreshingDevices = types.MethodType(
+        atft.Atft.StartRefreshingDevices, mock_atft, atft.Atft)
     mock_atft.DEVICE_REFRESH_INTERVAL = 0.01
     mock_atft._ListDevices = MagicMock()
     mock_atft.dev_listed_event = MagicMock()
@@ -217,6 +227,8 @@ class AtftTest(unittest.TestCase):
   @patch('threading.Timer')
   def testPauseResumeRefreshingDevice(self, mock_timer):
     mock_atft = MockAtft()
+    mock_atft.StartRefreshingDevices = types.MethodType(
+        atft.Atft.StartRefreshingDevices, mock_atft, atft.Atft)
     mock_atft.DEVICE_REFRESH_INTERVAL = 0.01
     mock_atft._ListDevices = MagicMock()
     mock_atft.dev_listed_event = MagicMock()
@@ -235,6 +247,8 @@ class AtftTest(unittest.TestCase):
   # Test atft.OnToggleAutoProv
   def testOnEnterAutoProvNormal(self):
     mock_atft = MockAtft()
+    mock_atft.StartRefreshingDevices = types.MethodType(
+        atft.Atft.StartRefreshingDevices, mock_atft, atft.Atft)
     mock_atft.toolbar = MagicMock()
     mock_atft.toolbar_auto_provision = MagicMock()
     mock_atft.toolbar_auto_provision.IsToggled.return_value = True
