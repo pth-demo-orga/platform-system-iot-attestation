@@ -20,9 +20,10 @@ locates Fastboot devices and can initiate communication between the ATFA and
 an Android Things device.
 """
 from datetime import datetime
+import json
 import math
 import os
-from sys import platform
+import sys
 import tempfile
 import threading
 
@@ -35,10 +36,10 @@ from fastboot_exceptions import ProductNotSpecifiedException
 
 import wx
 
-if platform.startswith('linux'):
+if sys.platform.startswith('linux'):
   from fastbootsh import FastbootDevice
   from serialmapperlinux import SerialMapper
-elif platform.startswith('win'):
+elif sys.platform.startswith('win'):
   from fastbootsubp import FastbootDevice
   from serialmapperwin import SerialMapper
 
@@ -117,8 +118,18 @@ class AtftLog(object):
     self.log_file_number = log_file_number
     self.file_size_max = math.floor(self.log_size / self.log_file_number)
     self.lock = threading.Lock()
-    # Create the first log file.
-    self._CreateLogFile()
+
+    log_files = []
+    for file_name in os.listdir(self.log_dir):
+      if (os.path.isfile(os.path.join(self.log_dir, file_name)) and
+          file_name.startswith('atft_log_')):
+        log_files.append(file_name)
+    if not log_files:
+      # Create the first log file.
+      self._CreateLogFile()
+    else:
+      log_files.sort()
+      self.log_dir_file = os.path.join(self.log_dir, log_files.pop())
     self.Info('Program', 'Program start')
 
   def Error(self, tag, string):
@@ -262,21 +273,7 @@ class Atft(wx.Frame):
   ATFA and an Android Things device.
 
   """
-  # Logging directory
-  LOG_DIR = os.path.join(tempfile.gettempdir(), 'atft_log')
-  # Log size limitation in bytes, default value is 10M
-  LOG_SIZE = 10000000
-  # How many log file are allowed to exist. This controls how much of the log
-  # information would be deleted if the log size exceeds LOG_SIZE. For example,
-  # if LOG_SIZE is set to 1000 bytes, and LOG_FILE_NUMBER is set to 10, then
-  # each log would be at most 100 bytes. If the log size is more than 1000
-  # bytes, the oldest log file get deleted, which means 100 bytes of logs is
-  # lost.
-  LOG_FILE_NUMBER = 10
-  # The interval for device refresh.
-  DEVICE_REFRESH_INTERVAL = 1.0
-  # The timeout allow for a device to reboot.
-  REBOOT_TIMEOUT = 60.0
+  CONFIG_FILE = 'config.json'
 
   ID_TOOL_PROVISION = 1
   ID_TOOL_CLEAR = 2
@@ -349,9 +346,12 @@ class Atft(wx.Frame):
   BUTTON_TARGET_DEV_TOGGLE_SORT = 'target_device_sort_button'
 
   def __init__(self):
+    self.configs = self.ParseConfigFile()
+
+    self.TITLE += ' ' + self.ATFT_VERSION
 
     # The atft_manager instance to manage various operations.
-    self.atft_manager = AtftManager(FastbootDevice, SerialMapper)
+    self.atft_manager = AtftManager(FastbootDevice, SerialMapper, self.configs)
 
     # The target devices refresh timer object
     self.refresh_timer = None
@@ -386,13 +386,97 @@ class Atft(wx.Frame):
 
     # Lock for showing alert box
     self.alert_lock = threading.Lock()
+    # The key threshold, if the number of attestation key in the ATFA device
+    # is lower than this number, an alert would appear.
+    self.key_threshold = self.DEFAULT_KEY_THRESHOLD
 
     self.InitializeUI()
 
-    # Log handler
-    self.log = AtftLog(self.LOG_DIR, self.LOG_SIZE, self.LOG_FILE_NUMBER)
+    if self.configs == None:
+      self.ShowAlert('Failed to parse config file!')
+      sys.exit(0)
+
+    self.log = self.CreateAtftLog()
+
     if not self.log.log_dir_file:
       self._SendAlertEvent('Failed to create log!')
+
+  def CreateAtftLog(self):
+    """Create an AtftLog Object.
+
+    This function exists for test mocking.
+    """
+    return AtftLog(self.LOG_DIR, self.LOG_SIZE, self.LOG_FILE_NUMBER)
+
+  def ParseConfigFile(self):
+    """Parse the configuration file and read in the necessary configurations.
+
+    Returns:
+      The parsed configuration map.
+    """
+    # Give default values
+    self.ATFT_VERSION = 'v0.0'
+    self.COMPATIBLE_ATFA_VERSION = 'v0'
+    self.DEVICE_REFRESH_INTERVAL = 1.0
+    self.DEFAULT_KEY_THRESHOLD = 0
+    self.LOG_DIR = None
+    self.LOG_SIZE = 0
+    self.LOG_FILE_NUMBER = 0
+    self.LANGUAGE = 'eng'
+    self.REBOOT_TIMEOUT = 0
+    self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = '*.atpa'
+
+    config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
+    if not os.path.exists(config_file_path):
+      return None
+
+    with open(config_file_path, 'r') as config_file:
+      configs = json.loads(config_file.read())
+
+    if not configs:
+      return None
+
+    try:
+      self.ATFT_VERSION = configs['ATFT_VERSION']
+      self.COMPATIBLE_ATFA_VERSION = configs['COMPATIBLE_ATFA_VERSION']
+      self.DEVICE_REFRESH_INTERVAL = float(configs['DEVICE_REFRESH_INTERVAL'])
+      self.DEFAULT_KEY_THRESHOLD = int(configs['DEFAULT_KEY_THRESHOLD'])
+      self.LOG_DIR = configs['LOG_DIR']
+      self.LOG_SIZE = int(configs['LOG_SIZE'])
+      self.LOG_FILE_NUMBER = int(configs['LOG_FILE_NUMBER'])
+      self.LANGUAGE = configs['LANGUAGE']
+      self.REBOOT_TIMEOUT = float(configs['REBOOT_TIMEOUT'])
+      self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = (
+          configs['PRODUCT_ATTRIBUTE_FILE_EXTENSION'])
+    except (KeyError, ValueError):
+      return None
+
+    return configs
+
+  def _StoreConfigToFile(self):
+    """Store the configuration to the configuration file.
+
+    By storing the configuration back, the program would remember the
+    configuration if it's opened again.
+    """
+    config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
+    with open(config_file_path, 'w') as config_file:
+      config_file.write(json.dumps(self.configs, sort_keys=True, indent=4))
+
+  def _GetCurrentPath(self):
+    """Get the current directory.
+
+    Returns:
+      The current directory.
+    """
+    if getattr(sys, 'frozen', False):
+      # we are running in a bundle
+      path = sys._MEIPASS  # pylint: disable=protected-access
+    else:
+      # we are running in a normal Python environment
+      path = os.path.dirname(os.path.abspath(__file__))
+    return path
+
 
   def InitializeUI(self):
     """Initialize the application UI."""
@@ -967,7 +1051,7 @@ class Atft(wx.Frame):
       event: The triggering event.
     """
     message = 'Choose Product Attributes File'
-    wildcard = '*.atpa'
+    wildcard = self.PRODUCT_ATTRIBUTE_FILE_EXTENSION
     callback = self.ProcessProductAttributesFile
     data = self.SelectFileArg(message, wildcard, callback)
     event = Event(self.select_file_event, value=data)
@@ -1001,7 +1085,7 @@ class Atft(wx.Frame):
     Args:
       event: The button click event.
     """
-    self.change_threshold_dialog.SetValue(str(self.atft_manager.key_threshold))
+    self.change_threshold_dialog.SetValue(str(self.key_threshold))
     self.change_threshold_dialog.CenterOnParent()
     if self.change_threshold_dialog.ShowModal() == wx.ID_OK:
       value = self.change_threshold_dialog.GetValue()
@@ -1010,7 +1094,9 @@ class Atft(wx.Frame):
         if number <= 0:
           # Invalid setting, just ignore.
           return
-        self.atft_manager.key_threshold = number
+        self.key_threshold = number
+        # Update the configuration.
+        self.configs['DEFAULT_KEY_THRESHOLD'] = str(self.key_threshold)
       except ValueError:
         pass
 
@@ -1046,7 +1132,7 @@ class Atft(wx.Frame):
     Args:
       event: The triggering event.
     """
-
+    self._StoreConfigToFile()
     # Stop the refresh timer on close.
     self.StopRefresh()
     self.Destroy()
@@ -1318,7 +1404,7 @@ class Atft(wx.Frame):
     self.low_key_alert_shown = True
     self.low_key_dialog.SetMessage(
         'The attestation keys available in this ATFA device is lower than ' +
-        str(self.atft_manager.key_threshold) + ' for this product!')
+        str(self.key_threshold) + ' for this product!')
     self.low_key_dialog.CenterOnParent()
     self.low_key_dialog.ShowModal()
 
@@ -1599,7 +1685,7 @@ class Atft(wx.Frame):
     If so, an alert box would appear to warn the user.
     """
     operation = 'Check ATFA Status'
-    threshold = self.atft_manager.key_threshold
+    threshold = self.key_threshold
 
     if self._CheckATFAStatus():
       keys_left = self.atft_manager.GetATFAKeysLeft()
