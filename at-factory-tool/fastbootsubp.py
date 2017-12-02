@@ -42,7 +42,7 @@ class FastbootDevice(object):
   """
 
   current_path = _GetCurrentPath()
-  fastboot_command = os.path.join(current_path, 'fastboot')
+  fastboot_command = os.path.join(current_path, 'fastboot.exe')
   HOST_OS = 'Windows'
 
   @staticmethod
