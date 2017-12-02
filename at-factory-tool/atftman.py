@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 # Copyright 2017 The Android Open Source Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -43,23 +44,53 @@ class EncryptionAlgorithm(object):
 
 class ProvisionStatus(object):
   """The provision status constant."""
-  IDLE              = 'Idle'
-  WAITING           = 'Waiting'
-  FUSEVBOOT_ING     = 'Fusing Bootloader Vboot Key'
-  FUSEVBOOT_SUCCESS = 'Bootloader Locked'
-  FUSEVBOOT_FAILED  = 'Fuse Bootloader Vboot Key Failed'
-  REBOOT_ING        = 'Rebooting Device To Check Vboot Key'
-  REBOOT_SUCCESS    = 'Bootloader Verified Boot Checked'
-  REBOOT_FAILED     = 'Reboot Device Failed'
-  FUSEATTR_ING      = 'Fusing Permanent Attributes'
-  FUSEATTR_SUCCESS  = 'Permanent Attributes Fused'
-  FUSEATTR_FAILED   = 'Fuse Permanent Attributes Failed'
-  LOCKAVB_ING       = 'Locking Android Verified Boot'
-  LOCKAVB_SUCCESS   = 'Android Verified Boot Locked'
-  LOCKAVB_FAILED    = 'Lock Android Verified Boot Failed'
-  PROVISION_ING     = 'Provisioning Attestation Key'
-  PROVISION_SUCCESS = 'Attestation Key Provisioned'
-  PROVISION_FAILED  = 'Provision Attestation Key Failed'
+  _PROCESSING        = 0
+  _SUCCESS           = 1
+  _FAILED            = 2
+
+  IDLE              = 0
+  WAITING           = 1
+  FUSEVBOOT_ING     = (10 + _PROCESSING)
+  FUSEVBOOT_SUCCESS = (10 + _SUCCESS)
+  FUSEVBOOT_FAILED  = (10 + _FAILED)
+  REBOOT_ING        = (20 + _PROCESSING)
+  REBOOT_SUCCESS    = (20 + _SUCCESS)
+  REBOOT_FAILED     = (20 + _FAILED)
+  FUSEATTR_ING      = (30 + _PROCESSING)
+  FUSEATTR_SUCCESS  = (30 + _SUCCESS)
+  FUSEATTR_FAILED   = (30 + _FAILED)
+  LOCKAVB_ING       = (40 + _PROCESSING)
+  LOCKAVB_SUCCESS   = (40 + _SUCCESS)
+  LOCKAVB_FAILED    = (40 + _FAILED)
+  PROVISION_ING     = (50 + _PROCESSING)
+  PROVISION_SUCCESS = (50 + _SUCCESS)
+  PROVISION_FAILED  = ( + _FAILED)
+
+  STRING_MAP = {
+    IDLE              : ['Idle', '初始'],
+    WAITING           : ['Waiting', '等待'],
+    FUSEVBOOT_ING     : ['Fusing Bootloader Vboot Key...', '烧录引导密钥中...'],
+    FUSEVBOOT_SUCCESS : ['Bootloader Locked', '烧录引导密钥成功'],
+    FUSEVBOOT_FAILED  : ['Fuse Bootloader Vboot Key Failed', '烧录引导密钥失败'],
+    REBOOT_ING        : ['Rebooting Device To Check Vboot Key...',
+                         '重启设备中...'],
+    REBOOT_SUCCESS    : ['Bootloader Verified Boot Checked', '重启设备成功'],
+    REBOOT_FAILED     : ['Reboot Device Failed', '重启设备失败'],
+    FUSEATTR_ING      : ['Fusing Permanent Attributes', '烧录产品信息中...'],
+    FUSEATTR_SUCCESS  : ['Permanent Attributes Fused', '烧录产品信息成功'],
+    FUSEATTR_FAILED   : ['Fuse Permanent Attributes Failed', '烧录产品信息失败'],
+    LOCKAVB_ING       : ['Locking Android Verified Boot', '锁定AVB中...'],
+    LOCKAVB_SUCCESS   : ['Android Verified Boot Locked', '锁定AVB成功'],
+    LOCKAVB_FAILED    : ['Lock Android Verified Boot Failed', '锁定AVB失败'],
+    PROVISION_ING     : ['Provisioning Attestation Key', '传输密钥中...'],
+    PROVISION_SUCCESS : ['Attestation Key Provisioned', '传输密钥成功'],
+    PROVISION_FAILED  : ['Provision Attestation Key Failed', '传输密钥失败']
+
+  }
+
+  @staticmethod
+  def ToString(provision_status, language_index):
+    return ProvisionStatus.STRING_MAP[provision_status][language_index]
 
 
 class ProvisionState(object):
@@ -212,7 +243,13 @@ class AtftManager(object):
         The additional configurations. Need to contain 'ATFA_REBOOT_TIMEOUT'.
     """
     # The timeout period for ATFA device reboot.
-    self.ATFA_REBOOT_TIMEOUT = configs['ATFA_REBOOT_TIMEOUT']
+    self.ATFA_REBOOT_TIMEOUT = 30
+    if configs and 'ATFA_REBOOT_TIMEOUT' in configs:
+      try:
+        self.ATFA_REBOOT_TIMEOUT = float(configs['ATFA_REBOOT_TIMEOUT'])
+      except ValueError:
+        pass
+
     # The serial numbers for the devices that are at least seen twice.
     self.stable_serials = []
     # The serail numbers for the devices that are only seen once.
