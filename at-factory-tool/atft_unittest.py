@@ -31,6 +31,19 @@ class MockAtft(atft.Atft):
     atft.Atft.__init__(self)
     self.atft_manager = MagicMock()
     self._SendPrintEvent = MagicMock()
+    self.log = MagicMock()
+
+  def _MockParseConfig(self):
+    self.self.ATFT_VERSION = 'vTest'
+    self.COMPATIBLE_ATFA_VERSION = 'v1'
+    self.DEVICE_REFRESH_INTERVAL = 1.0
+    self.LOG_DIR = 'test_log_dir'
+    self.LOG_SIZE = 1000
+    self.LOG_FILE_NUMBER = 2
+    self.LANGUAGE = 'ENG'
+    self.REBOOT_TIMEOUT = 1.0
+    self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = '*.atpa'
+    return {}
 
 
 class TestDeviceInfo(object):
@@ -300,22 +313,22 @@ class AtftTest(unittest.TestCase):
     mock_atft.change_threshold_dialog.ShowModal.return_value = wx.ID_OK
     mock_atft.change_threshold_dialog.GetValue.return_value = '100'
     mock_atft.OnChangeKeyThreshold(None)
-    self.assertEqual(100, mock_atft.atft_manager.key_threshold)
+    self.assertEqual(100, mock_atft.key_threshold)
 
   def testOnChangeKeyThresholdNotInt(self):
     mock_atft = MockAtft()
-    mock_atft.atft_manager.key_threshold = 100
+    mock_atft.key_threshold = 100
     mock_atft.change_threshold_dialog = MagicMock()
     mock_atft.change_threshold_dialog.ShowModal.return_value = wx.ID_OK
     mock_atft.change_threshold_dialog.GetValue.return_value = 'ABC'
     mock_atft.OnChangeKeyThreshold(None)
-    self.assertEqual(100, mock_atft.atft_manager.key_threshold)
+    self.assertEqual(100, mock_atft.key_threshold)
     mock_atft.change_threshold_dialog.GetValue.return_value = '2'
     mock_atft.OnChangeKeyThreshold(None)
-    self.assertEqual(2, mock_atft.atft_manager.key_threshold)
+    self.assertEqual(2, mock_atft.key_threshold)
     mock_atft.change_threshold_dialog.GetValue.return_value = '-10'
     mock_atft.OnChangeKeyThreshold(None)
-    self.assertEqual(2, mock_atft.atft_manager.key_threshold)
+    self.assertEqual(2, mock_atft.key_threshold)
 
   # Test atft._HandleAutoProv
   def testHandleAutoProv(self):
@@ -794,7 +807,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendStartMessageEvent = MagicMock()
     mock_atft._SendSucceedMessageEvent = MagicMock()
     mock_atft._SendLowKeyAlertEvent = MagicMock()
-    mock_atft.atft_manager.key_threshold = 100
+    mock_atft.key_threshold = 100
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft.atft_manager.GetATFAKeysLeft.side_effect = (
@@ -822,7 +835,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendStartMessageEvent = MagicMock()
     mock_atft._SendSucceedMessageEvent = MagicMock()
     mock_atft._SendLowKeyAlertEvent = MagicMock()
-    mock_atft.atft_manager.key_threshold = 100
+    mock_atft.key_threshold = 100
     mock_atft._HandleException = MagicMock()
     mock_atft.atft_manager.CheckATFAStatus.side_effect = (
         fastboot_exceptions.FastbootFailure(''))

@@ -191,11 +191,8 @@ class AtftManager(object):
   """
   SORT_BY_SERIAL = 0
   SORT_BY_LOCATION = 1
-  DEFAULT_KEY_THRESHOLD = 100
   # The length of the permanent attribute should be 1052.
   EXPECTED_ATTRIBUTE_LENGTH = 1052
-
-  ATFA_REBOOT_TIMEOUT = 30
 
   # The Permanent Attribute File JSON Key Names:
   JSON_PRODUCT_NAME = 'productName'
@@ -203,7 +200,7 @@ class AtftManager(object):
   JSON_PRODUCT_ATTRIBUTE = 'productPermanentAttribute'
   JSON_VBOOT_KEY = 'bootloaderPublicKey'
 
-  def __init__(self, fastboot_device_controller, serial_mapper):
+  def __init__(self, fastboot_device_controller, serial_mapper, configs):
     """Initialize attributes and store the supplied fastboot_device_controller.
 
     Args:
@@ -211,7 +208,11 @@ class AtftManager(object):
         The interface to interact with a fastboot device.
       serial_mapper:
         The interface to get the USB physical location to serial number map.
+      configs:
+        The additional configurations. Need to contain 'ATFA_REBOOT_TIMEOUT'.
     """
+    # The timeout period for ATFA device reboot.
+    self.ATFA_REBOOT_TIMEOUT = configs['ATFA_REBOOT_TIMEOUT']
     # The serial numbers for the devices that are at least seen twice.
     self.stable_serials = []
     # The serail numbers for the devices that are only seen once.
@@ -224,9 +225,6 @@ class AtftManager(object):
     self.target_devs = []
     # The product information for the selected product.
     self.product_info = None
-    # The key threshold, if the number of attestation key in the ATFA device
-    # is lower than this number, an alert would appear.
-    self.key_threshold = self.DEFAULT_KEY_THRESHOLD
      # The atfa device manager.
     self._atfa_dev_manager = AtfaDeviceManager(self)
     # The fastboot controller.
