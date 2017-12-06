@@ -23,6 +23,7 @@ import base64
 from datetime import datetime
 import json
 import os
+import re
 import tempfile
 import threading
 import uuid
@@ -551,7 +552,7 @@ class AtftManager(object):
     lines = state_string.splitlines()
     for line in lines:
       if line.startswith(BOOTLOADER_STRING):
-        key_value = line.replace(BOOTLOADER_STRING, '').split(': ')
+        key_value = re.split(r':[\s]*|=', line.replace(BOOTLOADER_STRING, ''))
         if len(key_value) == 2:
           state_map[key_value[0]] = key_value[1]
     return state_map
