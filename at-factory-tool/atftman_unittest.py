@@ -771,6 +771,53 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(ProvisionStatus.FUSEVBOOT_SUCCESS,
                      mock_device.provision_status)
 
+  def testCheckProvisionStatusFormat(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    # All initial state
+    self.status_map = {}
+    self.status_map['at-vboot-state'] = (
+      '(bootloader) bootloader-locked=1\n'
+      '(bootloader) bootloader-min-versions=-1,0,3\n'
+      '(bootloader) avb-perm-attr-set=0\n'
+      '(bootloader) avb-locked=0\n'
+      '(bootloader) avb-unlock-disabled=0\n'
+      '(bootloader) avb-min-versions=0:1,1:1,2:1,4097 :2,4098:2\n')
+    self.status_map['at-attest-uuid'] = ''
+    mock_device = MagicMock()
+    mock_device.GetVar.side_effect = self.MockGetVar
+    atft_manager.CheckProvisionStatus(mock_device)
+    self.assertEqual(ProvisionStatus.FUSEVBOOT_SUCCESS, mock_device.provision_status)
+    self.assertEqual(True, mock_device.provision_state.bootloader_locked)
+
+    self.status_map['at-vboot-state'] = (
+      '(bootloader) bootloader-locked:1\n'
+      '(bootloader) bootloader-min-versions:-1,0,3\n'
+      '(bootloader) avb-perm-attr-set:0\n'
+      '(bootloader) avb-locked:0\n'
+      '(bootloader) avb-unlock-disabled:0\n'
+      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+    self.status_map['at-attest-uuid'] = ''
+    mock_device = MagicMock()
+    mock_device.GetVar.side_effect = self.MockGetVar
+    atft_manager.CheckProvisionStatus(mock_device)
+    self.assertEqual(ProvisionStatus.FUSEVBOOT_SUCCESS, mock_device.provision_status)
+    self.assertEqual(True, mock_device.provision_state.bootloader_locked)
+
+    self.status_map['at-vboot-state'] = (
+      '(bootloader) bootloader-locked:\t1\n'
+      '(bootloader) bootloader-min-versions:\t-1,0,3\n'
+      '(bootloader) avb-perm-attr-set:\t0\n'
+      '(bootloader) avb-locked:\t0\n'
+      '(bootloader) avb-unlock-disabled:\t0\n'
+      '(bootloader) avb-min-versions:\t0:1,1:1,2:1,4097 :2,4098:2\n')
+    self.status_map['at-attest-uuid'] = ''
+    mock_device = MagicMock()
+    mock_device.GetVar.side_effect = self.MockGetVar
+    atft_manager.CheckProvisionStatus(mock_device)
+    self.assertEqual(ProvisionStatus.FUSEVBOOT_SUCCESS, mock_device.provision_status)
+    self.assertEqual(True, mock_device.provision_state.bootloader_locked)
+
   def testCheckProvisionState(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
