@@ -1596,8 +1596,7 @@ class Atft(wx.Frame):
       if not target:
         continue
       # Start state could be IDLE or FUSEVBOOT_FAILED
-      if (TEST_MODE or target.provision_status == ProvisionStatus.IDLE or
-          target.provision_status == ProvisionStatus.FUSEVBOOT_FAILED):
+      if (TEST_MODE or not target.provision_state.bootloader_locked):
         target.provision_status = ProvisionStatus.WAITING
         pending_targets.append(target)
       else:
@@ -1702,10 +1701,10 @@ class Atft(wx.Frame):
       # Start state could be FUSEVBOOT_SUCCESS or REBOOT_SUCCESS
       # or FUSEATTR_FAILED
       # Note: Reboot to check vboot is optional, user can skip that manually.
-      if (TEST_MODE or
-          target.provision_status == ProvisionStatus.FUSEVBOOT_SUCCESS or
-          target.provision_status == ProvisionStatus.REBOOT_SUCCESS or
-          target.provision_status == ProvisionStatus.FUSEATTR_FAILED):
+      if (TEST_MODE or (
+            target.provision_state.bootloader_locked and
+            not target.provision_state.avb_perm_attr_set
+          )):
         pending_targets.append(target)
       else:
         self._SendAlertEvent(self.ALERT_FUSE_PERM_ATTR_FUSED)
@@ -1748,9 +1747,11 @@ class Atft(wx.Frame):
       if not target:
         continue
       # Start state could be FUSEATTR_SUCCESS or LOCKAVB_FAIELD
-      if (TEST_MODE or
-          target.provision_status == ProvisionStatus.FUSEATTR_SUCCESS or
-          target.provision_status == ProvisionStatus.LOCKAVB_FAILED):
+      if (TEST_MODE or(
+            target.provision_state.bootloader_locked and
+            target.provision_state.avb_perm_attr_set and
+            not target.provision_state.avb_locked
+          )):
         target.provision_status = ProvisionStatus.WAITING
         pending_targets.append(target)
       else:
@@ -1871,8 +1872,12 @@ class Atft(wx.Frame):
         continue
       pending_targets.append(target_dev)
       status = target_dev.provision_status
-      if (TEST_MODE or status == ProvisionStatus.LOCKAVB_SUCCESS or
-          status == ProvisionStatus.PROVISION_FAILED):
+      if (TEST_MODE or (
+          target_dev.provision_state.bootloader_locked and
+          target_dev.provision_state.avb_perm_attr_set and
+          target_dev.provision_state.avb_locked and
+          not target_dev.provision_state.provisioned
+        )):
         target_dev.provision_status = ProvisionStatus.WAITING
       else:
         self._SendAlertEvent(self.ALERT_PROV_PROVED)
@@ -1918,32 +1923,25 @@ class Atft(wx.Frame):
       target: The target device object.
     """
     self.auto_prov_lock.acquire()
-    while target.provision_status != ProvisionStatus.PROVISION_SUCCESS:
-      if target.provision_status == ProvisionStatus.WAITING:
+    while (not ProvisionStatus.isFailed(target.provision_status)):
+      if not target.provision_state.bootloader_locked:
         self._FuseVbootKeyTarget(target)
-        if (target.provision_status == ProvisionStatus.FUSEVBOOT_FAILED or
-            target.provision_status == ProvisionStatus.REBOOT_FAILED):
-          break
-      elif (target.provision_status == ProvisionStatus.FUSEVBOOT_SUCCESS or
-            target.provision_status == ProvisionStatus.REBOOT_SUCCESS):
+        continue
+      if not target.provision_state.avb_perm_attr_set:
         self._FusePermAttrTarget(target)
-        if target.provision_status == ProvisionStatus.FUSEATTR_FAILED:
-          break
-      elif target.provision_status == ProvisionStatus.FUSEATTR_SUCCESS:
+        continue
+      if not target.provision_state.avb_locked:
         self._LockAvbTarget(target)
-        if target.provision_status == ProvisionStatus.LOCKAVB_FAILED:
-          break
-      elif target.provision_status == ProvisionStatus.LOCKAVB_SUCCESS:
+        continue
+      if not target.provision_state.provisioned:
         self._ProvisionTarget(target)
         if self.atft_manager.GetATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
           self.toolbar.ToggleTool(self.ID_TOOL_PROVISION, False)
           self.OnToggleAutoProv(None)
-        if target.provision_status == ProvisionStatus.PROVISION_FAILED:
-          break
-      else:
-        break
+        continue
+      break
     self.auto_prov_lock.release()
 
   def _ProcessKey(self):

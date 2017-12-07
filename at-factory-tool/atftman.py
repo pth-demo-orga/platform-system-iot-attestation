@@ -93,6 +93,18 @@ class ProvisionStatus(object):
   def ToString(provision_status, language_index):
     return ProvisionStatus.STRING_MAP[provision_status][language_index]
 
+  @staticmethod
+  def isSuccess(provision_status):
+    return provision_status % 10 == ProvisionStatus._SUCCESS
+
+  @staticmethod
+  def isProcessing(provision_status):
+    return provision_status % 10 == ProvisionStatus._PROCESSING
+
+  @staticmethod
+  def isFailed(provision_status):
+    return provision_status % 10 == ProvisionStatus._FAILED
+
 
 class ProvisionState(object):
   """The provision state of the target device."""
