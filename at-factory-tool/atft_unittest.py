@@ -316,11 +316,15 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft.atft_manager.target_devs.append(test_dev1)
     mock_atft.atft_manager.target_devs.append(test_dev2)
+    mock_atft.atft_manager.CheckProvisionStatus.side_effect = (
+        lambda target=test_dev2, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        self.MockStateChange(target, state))
     mock_atft.OnToggleAutoProv(None)
     self.assertEqual(False, mock_atft.auto_prov)
     self.assertEqual(test_dev1.provision_status,
                      ProvisionStatus.PROVISION_SUCCESS)
-    self.assertEqual(test_dev2.provision_status, ProvisionStatus.IDLE)
+    mock_atft.atft_manager.CheckProvisionStatus.assert_called_once()
+    self.assertEqual(test_dev2.provision_status, ProvisionStatus.LOCKAVB_SUCCESS)
 
   # Test atft.OnChangeKeyThreshold
   def testOnChangeKeyThreshold(self):
@@ -360,7 +364,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._HandleStateTransition = MagicMock()
     mock_atft._HandleAutoProv()
     self.assertEqual(test_dev2.provision_status, ProvisionStatus.WAITING)
-    self.assertEqual(2, mock_atft._CreateThread.call_count)
+    self.assertEqual(1, mock_atft._CreateThread.call_count)
 
   # Test atft._HandleKeysLeft
   def MockGetKeysLeft(self, keys_left_array):
@@ -437,6 +441,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._ProvisionTarget.side_effect = (
         lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.PROVISION_SUCCESS,
                      test_dev1.provision_status)
@@ -461,6 +470,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._ProvisionTarget.side_effect = (
         lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
             self.MockStateChange(target, state))
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.FUSEVBOOT_FAILED,
                      test_dev1.provision_status)
@@ -485,6 +499,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._ProvisionTarget.side_effect = (
         lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.REBOOT_FAILED, test_dev1.provision_status)
 
@@ -508,6 +527,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._ProvisionTarget.side_effect = (
         lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.FUSEATTR_FAILED,
                      test_dev1.provision_status)
@@ -532,6 +556,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._ProvisionTarget.side_effect = (
         lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.LOCKAVB_FAILED, test_dev1.provision_status)
 
@@ -555,6 +584,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._ProvisionTarget.side_effect = (
         lambda target=mock_atft, state=ProvisionStatus.PROVISION_FAILED:
         self.MockStateChange(target, state))
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.PROVISION_FAILED,
                      test_dev1.provision_status)
@@ -584,6 +618,11 @@ class AtftTest(unittest.TestCase):
     # and provision key.
     test_dev1.provision_state.bootloader_locked = True
     test_dev1.provision_state.avb_locked = True
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.PROVISION_SUCCESS,
                      test_dev1.provision_status)
@@ -610,6 +649,7 @@ class AtftTest(unittest.TestCase):
 
   def MockReboot(self, target, timeout, success, fail):
     success()
+    target.provision_state.bootloader_locked = True
 
   @patch('wx.QueueEvent')
   def testFuseVbootKey(self, mock_queue_event):
