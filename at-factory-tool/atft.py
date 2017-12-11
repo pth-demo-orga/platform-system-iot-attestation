@@ -809,7 +809,7 @@ class Atft(wx.Frame):
     self.cmd_output = wx.TextCtrl(
         self.panel,
         wx.ID_ANY,
-        size=(800, 320),
+        size=(800, 190),
         style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL)
     self.vbox.Add(self.cmd_output, 0, wx.ALL | wx.EXPAND, 5)
 
@@ -817,7 +817,7 @@ class Atft(wx.Frame):
     self.toolbar.Realize()
     self.statusbar = self.CreateStatusBar()
     self.statusbar.SetStatusText('Ready')
-    self.SetSize((800, 800))
+    self.SetSize((800, 720))
     self.SetTitle(self.TITLE)
     self.Center()
     self.Show(True)
