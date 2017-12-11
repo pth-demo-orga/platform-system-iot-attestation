@@ -93,6 +93,18 @@ class ProvisionStatus(object):
   def ToString(provision_status, language_index):
     return ProvisionStatus.STRING_MAP[provision_status][language_index]
 
+  @staticmethod
+  def isSuccess(provision_status):
+    return provision_status % 10 == ProvisionStatus._SUCCESS
+
+  @staticmethod
+  def isProcessing(provision_status):
+    return provision_status % 10 == ProvisionStatus._PROCESSING
+
+  @staticmethod
+  def isFailed(provision_status):
+    return provision_status % 10 == ProvisionStatus._FAILED
+
 
 class ProvisionState(object):
   """The provision state of the target device."""
@@ -149,6 +161,9 @@ class DeviceInfo(object):
 
   def Oem(self, oem_command, err_to_out=False):
     return self._fastboot_device_controller.Oem(oem_command, err_to_out)
+
+  def Flash(self, partition, file_path):
+    return self._fastboot_device_controller.Flash(partition, file_path)
 
   def Upload(self, file_path):
     return self._fastboot_device_controller.Upload(file_path)
@@ -442,15 +457,21 @@ class AtftManager(object):
       serial_location_map: The serial location map.
       check_status: Whether to check provision status for the target device.
     """
-    controller = self._fastboot_device_controller(serial)
-    location = None
-    if serial in serial_location_map:
-      location = serial_location_map[serial]
+    try:
+      controller = self._fastboot_device_controller(serial)
+      location = None
+      if serial in serial_location_map:
+        location = serial_location_map[serial]
 
-    new_target_dev = DeviceInfo(controller, serial, location)
-    if check_status:
-      self.CheckProvisionStatus(new_target_dev)
-    self.target_devs.append(new_target_dev)
+      new_target_dev = DeviceInfo(controller, serial, location)
+      if check_status:
+        self.CheckProvisionStatus(new_target_dev)
+      self.target_devs.append(new_target_dev)
+    except FastbootFailure as e:
+      e.msg = ('Error while creating new device: ' + str(new_target_dev) +
+               '\n'+ e.msg)
+      self.stable_serials.remove(serial)
+      raise e
 
   def _AddNewAtfa(self, atfa_serial):
     """Create a new ATFA device object.
@@ -532,12 +553,8 @@ class AtftManager(object):
         if callback_lock and callback_lock.acquire(False):
           success_serials.append(serial)
 
-    serial_location_map = self._serial_mapper.get_serial_map()
     for serial in success_serials:
       self._reboot_callbacks[serial].success()
-      self._CreateNewTargetDevice(serial, serial_location_map, False)
-      self.GetTargetDevice(serial).provision_status = (
-          ProvisionStatus.REBOOT_SUCCESS)
 
   def _ParseStateString(self, state_string):
     """Parse the string returned by 'at-vboot-state' to a key-value map.
@@ -606,6 +623,7 @@ class AtftManager(object):
       if not status_set:
         target_dev.provision_status = ProvisionStatus.FUSEVBOOT_SUCCESS
       target_dev.provision_state.bootloader_locked = True
+
 
   def TransferContent(self, src, dst):
     """Transfer content from a device to another device.
@@ -686,7 +704,7 @@ class AtftManager(object):
       self.CheckProvisionStatus(target)
       if not target.provision_state.provisioned:
         raise FastbootFailure('Status not updated.')
-    except FastbootFailure as e:
+    except (FastbootFailure, DeviceNotFoundException) as e:
       target.provision_status = ProvisionStatus.PROVISION_FAILED
       raise e
 
@@ -716,6 +734,10 @@ class AtftManager(object):
       self.CheckProvisionStatus(target)
       if not target.provision_state.bootloader_locked:
         raise FastbootFailure('Status not updated.')
+
+      # # Another possible flow:
+      # target.Flash('sec', temp_file_name)
+      # os.remove(temp_file_name)
     except FastbootFailure as e:
       target.provision_status = ProvisionStatus.FUSEVBOOT_FAILED
       raise e
@@ -793,15 +815,15 @@ class AtftManager(object):
 
       reboot_callback = RebootCallback(
           timeout,
-          self.RebootCallbackWrapper(success_callback, serial),
-          self.RebootCallbackWrapper(timeout_callback, serial))
+          self.RebootCallbackWrapper(success_callback, serial, True),
+          self.RebootCallbackWrapper(timeout_callback, serial, False))
       self._reboot_callbacks[serial] = reboot_callback
 
     except FastbootFailure as e:
       target.provision_status = ProvisionStatus.REBOOT_FAILED
       raise e
 
-  def RebootCallbackWrapper(self, callback, serial):
+  def RebootCallbackWrapper(self, callback, serial, success):
     """This wrapper function wraps the original callback function.
 
     Some clean up operations are added. We need to remove the handler if
@@ -812,17 +834,30 @@ class AtftManager(object):
     Args:
       callback: The original callback function.
       serial: The serial number for the device.
+      success: Whether this is the success callback.
     Returns:
       An extended callback function.
     """
-    def RebootCallbackFunc(callback=callback, serial=serial):
-      rebooting_dev = self.GetTargetDevice(serial)
-      if rebooting_dev:
-        self.target_devs.remove(rebooting_dev)
-        del rebooting_dev
-      callback()
-      self._reboot_callbacks[serial].Release()
-      del self._reboot_callbacks[serial]
+    def RebootCallbackFunc(callback=callback, serial=serial, success=success):
+      try:
+        rebooting_dev = self.GetTargetDevice(serial)
+        if rebooting_dev:
+          self.target_devs.remove(rebooting_dev)
+          del rebooting_dev
+        if success:
+          serial_location_map = self._serial_mapper.get_serial_map()
+          self._CreateNewTargetDevice(serial, serial_location_map, True)
+          self.GetTargetDevice(serial).provision_status = (
+              ProvisionStatus.REBOOT_SUCCESS)
+        callback()
+        self._reboot_callbacks[serial].Release()
+        del self._reboot_callbacks[serial]
+      except FastbootFailure as e:
+        # Release the lock so that it can be obtained again.
+        self._reboot_callbacks[serial].lock.release()
+        raise e
+
+
 
     return RebootCallbackFunc
 
