@@ -118,6 +118,30 @@ class FastbootDevice(object):
     finally:
       self._lock.release()
 
+  def Flash(self, partition, file_path):
+    """Flash a file to a partition.
+
+    Args:
+      file_path: The partition file to be flashed.
+      partition: The partition to be flashed.
+    Returns:
+      The output for the fastboot command required.
+    Raises:
+      FastbootFailure: If failure happens during the command.
+    """
+    try:
+      self._lock.acquire()
+      return subprocess.check_output(
+          [
+              FastbootDevice.fastboot_command, '-s', self.serial_number,
+              'flash', partition, file_path
+          ],
+          creationflags=CREATE_NO_WINDOW)
+    except subprocess.CalledProcessError as e:
+      raise fastboot_exceptions.FastbootFailure(e.output)
+    finally:
+      self._lock.release()
+
   def Upload(self, file_path):
     """Pulls a file from the fastboot device to the local file system.
 
