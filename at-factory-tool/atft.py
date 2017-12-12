@@ -295,6 +295,9 @@ class Atft(wx.Frame):
     # The field to sort target devices
     self.sort_by = self.atft_manager.SORT_BY_LOCATION
 
+    # List of serial numbers for the devices in auto provisioning mode.
+    self.auto_dev_serials = []
+
     # Store the last refreshed target list, we use this list to prevent
     # refreshing the same list.
     self.last_target_list = []
@@ -806,7 +809,7 @@ class Atft(wx.Frame):
     self.cmd_output = wx.TextCtrl(
         self.panel,
         wx.ID_ANY,
-        size=(800, 320),
+        size=(800, 190),
         style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL)
     self.vbox.Add(self.cmd_output, 0, wx.ALL | wx.EXPAND, 5)
 
@@ -814,7 +817,7 @@ class Atft(wx.Frame):
     self.toolbar.Realize()
     self.statusbar = self.CreateStatusBar()
     self.statusbar.SetStatusText('Ready')
-    self.SetSize((800, 800))
+    self.SetSize((800, 720))
     self.SetTitle(self.TITLE)
     self.Center()
     self.Show(True)
@@ -1000,9 +1003,9 @@ class Atft(wx.Frame):
     else:
       # Leave auto provisioning mode.
       for device in self.atft_manager.target_devs:
-        # Change all waiting devices' status to idle.
+        # Change all waiting devices' status to it's original state.
         if device.provision_status == ProvisionStatus.WAITING:
-          device.provision_status = ProvisionStatus.IDLE
+          self.atft_manager.CheckProvisionStatus(device)
       message = 'Automatic key provisioning end'
       self.PrintToCommandWindow(message)
       self.log.Info('Autoprov', message)
@@ -1244,11 +1247,14 @@ class Atft(wx.Frame):
     """
     # All idle devices -> waiting.
     for target_dev in self.atft_manager.target_devs:
-      if target_dev.provision_status == ProvisionStatus.IDLE:
+      if (target_dev.serial_number not in self.auto_dev_serials and
+          target_dev.provision_status != ProvisionStatus.PROVISION_SUCCESS and
+          not ProvisionStatus.isFailed(target_dev.provision_status)
+          ):
+        self.auto_dev_serials.append(target_dev.serial_number)
         target_dev.provision_status = ProvisionStatus.WAITING
+        self._CreateThread(self._HandleStateTransition, target_dev)
 
-    for target_dev in self.atft_manager.target_devs:
-      self._CreateThread(self._HandleStateTransition, target_dev)
 
   def _HandleKeysLeft(self):
     """Display how many keys left in the ATFA device.
@@ -1596,8 +1602,7 @@ class Atft(wx.Frame):
       if not target:
         continue
       # Start state could be IDLE or FUSEVBOOT_FAILED
-      if (TEST_MODE or target.provision_status == ProvisionStatus.IDLE or
-          target.provision_status == ProvisionStatus.FUSEVBOOT_FAILED):
+      if (TEST_MODE or not target.provision_state.bootloader_locked):
         target.provision_status = ProvisionStatus.WAITING
         pending_targets.append(target)
       else:
@@ -1617,6 +1622,7 @@ class Atft(wx.Frame):
       target: The target device DeviceInfo object.
     """
     operation = 'Fuse bootloader verified boot key'
+    serial = target.serial_number
     self._SendOperationStartEvent(operation, target)
     self.PauseRefresh()
 
@@ -1666,6 +1672,13 @@ class Atft(wx.Frame):
     # released.
     reboot_lock.acquire()
 
+    target = self.atft_manager.GetTargetDevice(serial)
+    if target and not target.provision_state.bootloader_locked:
+      target.provision_status = ProvisionStatus.FUSEVBOOT_FAILED
+      e = FastbootFailure('Status not updated.')
+      self._HandleException('E', e, operation)
+      return
+
   def _RebootSuccessCallback(self, msg, lock):
     """The callback if reboot succeed.
 
@@ -1702,10 +1715,10 @@ class Atft(wx.Frame):
       # Start state could be FUSEVBOOT_SUCCESS or REBOOT_SUCCESS
       # or FUSEATTR_FAILED
       # Note: Reboot to check vboot is optional, user can skip that manually.
-      if (TEST_MODE or
-          target.provision_status == ProvisionStatus.FUSEVBOOT_SUCCESS or
-          target.provision_status == ProvisionStatus.REBOOT_SUCCESS or
-          target.provision_status == ProvisionStatus.FUSEATTR_FAILED):
+      if (TEST_MODE or (
+            target.provision_state.bootloader_locked and
+            not target.provision_state.avb_perm_attr_set
+          )):
         pending_targets.append(target)
       else:
         self._SendAlertEvent(self.ALERT_FUSE_PERM_ATTR_FUSED)
@@ -1748,9 +1761,11 @@ class Atft(wx.Frame):
       if not target:
         continue
       # Start state could be FUSEATTR_SUCCESS or LOCKAVB_FAIELD
-      if (TEST_MODE or
-          target.provision_status == ProvisionStatus.FUSEATTR_SUCCESS or
-          target.provision_status == ProvisionStatus.LOCKAVB_FAILED):
+      if (TEST_MODE or(
+            target.provision_state.bootloader_locked and
+            target.provision_state.avb_perm_attr_set and
+            not target.provision_state.avb_locked
+          )):
         target.provision_status = ProvisionStatus.WAITING
         pending_targets.append(target)
       else:
@@ -1871,8 +1886,12 @@ class Atft(wx.Frame):
         continue
       pending_targets.append(target_dev)
       status = target_dev.provision_status
-      if (TEST_MODE or status == ProvisionStatus.LOCKAVB_SUCCESS or
-          status == ProvisionStatus.PROVISION_FAILED):
+      if (TEST_MODE or (
+          target_dev.provision_state.bootloader_locked and
+          target_dev.provision_state.avb_perm_attr_set and
+          target_dev.provision_state.avb_locked and
+          not target_dev.provision_state.provisioned
+        )):
         target_dev.provision_status = ProvisionStatus.WAITING
       else:
         self._SendAlertEvent(self.ALERT_PROV_PROVED)
@@ -1918,32 +1937,33 @@ class Atft(wx.Frame):
       target: The target device object.
     """
     self.auto_prov_lock.acquire()
-    while target.provision_status != ProvisionStatus.PROVISION_SUCCESS:
-      if target.provision_status == ProvisionStatus.WAITING:
+    serial = target.serial_number
+    while not ProvisionStatus.isFailed(target.provision_status):
+      target = self.atft_manager.GetTargetDevice(serial)
+      if not target:
+        # The target disappear somehow.
+        break
+      if not self.auto_prov:
+        # Auto provision mode exited.
+        break
+      if not target.provision_state.bootloader_locked:
         self._FuseVbootKeyTarget(target)
-        if (target.provision_status == ProvisionStatus.FUSEVBOOT_FAILED or
-            target.provision_status == ProvisionStatus.REBOOT_FAILED):
-          break
-      elif (target.provision_status == ProvisionStatus.FUSEVBOOT_SUCCESS or
-            target.provision_status == ProvisionStatus.REBOOT_SUCCESS):
+        continue
+      elif not target.provision_state.avb_perm_attr_set:
         self._FusePermAttrTarget(target)
-        if target.provision_status == ProvisionStatus.FUSEATTR_FAILED:
-          break
-      elif target.provision_status == ProvisionStatus.FUSEATTR_SUCCESS:
+        continue
+      elif not target.provision_state.avb_locked:
         self._LockAvbTarget(target)
-        if target.provision_status == ProvisionStatus.LOCKAVB_FAILED:
-          break
-      elif target.provision_status == ProvisionStatus.LOCKAVB_SUCCESS:
+        continue
+      elif not target.provision_state.provisioned:
         self._ProvisionTarget(target)
         if self.atft_manager.GetATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
           self.toolbar.ToggleTool(self.ID_TOOL_PROVISION, False)
           self.OnToggleAutoProv(None)
-        if target.provision_status == ProvisionStatus.PROVISION_FAILED:
-          break
-      else:
-        break
+      break
+    self.auto_dev_serials.remove(serial)
     self.auto_prov_lock.release()
 
   def _ProcessKey(self):
