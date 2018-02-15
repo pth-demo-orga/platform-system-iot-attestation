@@ -30,8 +30,12 @@ import threading
 
 from atftman import AtftManager
 from atftman import ProvisionStatus
+
+from fastboot_exceptions import DeviceCreationException
 from fastboot_exceptions import DeviceNotFoundException
 from fastboot_exceptions import FastbootFailure
+from fastboot_exceptions import OsVersionNotAvailableException
+from fastboot_exceptions import OsVersionNotCompatibleException
 from fastboot_exceptions import ProductAttributesFileFormatError
 from fastboot_exceptions import ProductNotSpecifiedException
 
@@ -106,12 +110,6 @@ class AtftLog(object):
       log_size: The maximum total size for all the log files.
       log_file_number: The maximum number for log files.
     """
-    if not os.path.exists(log_dir):
-      # If log directory does not exist, try to create it.
-      try:
-        os.mkdir(log_dir)
-      except IOError:
-        return
     self.log_dir = log_dir
     self.log_dir_file = None
     self.file_size = 0
@@ -119,6 +117,21 @@ class AtftLog(object):
     self.log_file_number = log_file_number
     self.file_size_max = math.floor(self.log_size / self.log_file_number)
     self.lock = threading.Lock()
+    self.Initialize()
+
+  def Initialize(self):
+    """Do the necessary initialization.
+
+    Create log directory if not exists. Also create the first log file if not
+    exists. Log a 'Program Start' entry. Point the current log directory to
+    the latest log file.
+    """
+    if not os.path.exists(self.log_dir):
+      # If log directory does not exist, try to create it.
+      try:
+        os.mkdir(self.log_dir)
+      except IOError:
+        return
 
     log_files = []
     for file_name in os.listdir(self.log_dir):
@@ -221,7 +234,7 @@ class AtftLog(object):
   def _CreateLogFile(self):
     """Create a new log file using timestamp as file name.
     """
-    timestamp = int((datetime.now() - datetime(1970, 1, 1)).total_seconds())
+    timestamp = self._GetCurrentTimestamp()
     log_file_name = 'atft_log_' + str(timestamp)
     log_file_path = os.path.join(self.log_dir, log_file_name)
     i = 1
@@ -236,6 +249,9 @@ class AtftLog(object):
       self.log_dir_file = log_file_path
     except IOError:
       self.log_dir_file = None
+
+  def _GetCurrentTimestamp(self):
+    return int((datetime.now() - datetime(1970, 1, 1)).total_seconds())
 
   def __del__(self):
     """Cleanup function. This would log the 'Program Exit' message.
@@ -365,7 +381,7 @@ class Atft(wx.Frame):
     """
     # Give default values
     self.ATFT_VERSION = 'v0.0'
-    self.COMPATIBLE_ATFA_VERSION = 'v0'
+    self.COMPATIBLE_ATFA_VERSION = '0'
     self.DEVICE_REFRESH_INTERVAL = 1.0
     self.DEFAULT_KEY_THRESHOLD = 0
     self.LOG_DIR = None
@@ -389,7 +405,6 @@ class Atft(wx.Frame):
       self.ATFT_VERSION = str(configs['ATFT_VERSION'])
       self.COMPATIBLE_ATFA_VERSION = str(configs['COMPATIBLE_ATFA_VERSION'])
       self.DEVICE_REFRESH_INTERVAL = float(configs['DEVICE_REFRESH_INTERVAL'])
-      self.DEFAULT_KEY_THRESHOLD = int(configs['DEFAULT_KEY_THRESHOLD'])
       self.LOG_DIR = str(configs['LOG_DIR'])
       self.LOG_SIZE = int(configs['LOG_SIZE'])
       self.LOG_FILE_NUMBER = int(configs['LOG_FILE_NUMBER'])
@@ -586,7 +601,10 @@ class Atft(wx.Frame):
         'Cannot provision device that is not ready for provisioning or '
         'already provisioned!',
         '无法传输密钥给一个不在正确状态或者已经拥有密钥的设备！'][index]
-
+    self.ALERT_INCOMPATIBLE_ATFA = [
+        'Detected an ATFA device having incompatible version with this tool, '
+        'please upgrade your ATFA device to the latest version!',
+        '检测到一个与这个软件不兼容的ATFA设备，请升级你的ATFA设备！'][index]
 
 
   def InitializeUI(self):
@@ -1543,9 +1561,18 @@ class Atft(wx.Frame):
       operation = 'List Devices'
       try:
         self.atft_manager.ListDevices(self.sort_by)
+      except DeviceCreationException as e:
+        self._HandleException('W', e, operation, e.device)
+      except OsVersionNotAvailableException as e:
+        e.msg = 'Failed to get ATFA version'
+        self._HandleException('W', e, operation, e.device)
+        self._SendAlertEvent(self.ALERT_INCOMPATIBLE_ATFA)
+      except OsVersionNotCompatibleException as e:
+        e.msg = 'Incompatible ATFA version, version is ' + str(e.version)
+        self._HandleException('W', e, operation, e.device)
+        self._SendAlertEvent(self.ALERT_INCOMPATIBLE_ATFA)
       except FastbootFailure as e:
         self._HandleException('W', e, operation)
-        return
       finally:
         # 'Release the lock'.
         self.listing_device_lock.release()
