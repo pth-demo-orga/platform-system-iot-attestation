@@ -389,6 +389,7 @@ class Atft(wx.Frame):
     self.LOG_FILE_NUMBER = 0
     self.LANGUAGE = 'eng'
     self.REBOOT_TIMEOUT = 0
+    self.ATFA_REBOOT_TIMEOUT = 0
     self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = '*.atpa'
     self.UPDATE_FILE_EXTENSION = '*.upd'
 
@@ -494,6 +495,7 @@ class Atft(wx.Frame):
     self.MENU_SHUTDOWN = ['Shutdown', '关闭'][index]
 
     self.MENU_STOREKEY = ['Store Key Bundle', '存储密钥打包文件'][index]
+    self.MENU_PURGE = ['Purge Key Bundle', '清除密钥'][index]
     self.MENU_PROCESSKEY = ['Process Key Bundle', '处理密钥打包文件'][index]
 
     # Title
@@ -525,6 +527,7 @@ class Atft(wx.Frame):
     self.DIALOG_LOW_KEY_TITLE = ['Low Key Alert', '密钥不足警告'][index]
     self.DIALOG_ALERT_TEXT = ''
     self.DIALOG_ALERT_TITLE = ['Alert', '警告'][index]
+    self.DIALOG_WARNING_TITLE = ['Warning', '警告'][index]
     self.DIALOG_CHOOSE_PRODUCT_ATTRIBUTE_FILE = [
         'Choose Product Attributes File', '选择产品文件'][index]
     self.DIALOG_CHOOSE_UPDATE_FILE = [
@@ -535,6 +538,9 @@ class Atft(wx.Frame):
                                      '目标设备排序按钮'][index]
 
     # Alerts
+    self.ALERT_NO_ATFA = [
+        'No ATFA device available!',
+        '没有可用的ATFA设备！'][index]
     self.ALERT_PROV_NO_SELECTED = [
         "Can't Provision! No target device selected!",
         '无法传输密钥！目标设备没有选择！'][index]
@@ -602,6 +608,13 @@ class Atft(wx.Frame):
     self.ALERT_UPDATE_FAILURE = [
         'Update ATFA failed, Error: ',
         '升级ATFA设备失败！错误信息：'][index]
+    self.ALERT_PURGE_KEY_FAILURE = [
+        'Purge key failed, Error: ',
+        '清除密钥失败！错误信息：'][index]
+    self.ALERT_CONFIRM_PURGE_KEY = [
+        'Are you sure you want to purge all the keys for this product?\n'
+        'The keys would be purged permanently!!!',
+        '你确定要清楚密钥吗？\n设备中的密钥将永久丢失！！！'][index]
 
 
   def InitializeUI(self):
@@ -706,6 +719,9 @@ class Atft(wx.Frame):
     self.Bind(wx.EVT_MENU, self.OnStoreKey, menu_storekey)
     menu_processkey = self.key_menu.Append(wx.ID_ANY, self.MENU_PROCESSKEY)
     self.Bind(wx.EVT_MENU, self.OnProcessKey, menu_processkey)
+
+    menu_purgekey = self.key_menu.Append(wx.ID_ANY, self.MENU_PURGE)
+    self.Bind(wx.EVT_MENU, self.OnPurgeKey, menu_purgekey)
 
     self.SetMenuBar(self.menubar)
 
@@ -1060,7 +1076,6 @@ class Atft(wx.Frame):
       wildcard: The wildcard to filter the files to be selected.
       callback: The callback to be called once the file is selected with
         argument pathname of the selected file.
-
     """
 
     def __init__(self, message, wildcard, callback):
@@ -1153,6 +1168,20 @@ class Atft(wx.Frame):
     event = Event(self.select_file_event, value=data)
     wx.QueueEvent(self, event)
 
+  def OnPurgeKey(self, event):
+    """Purge the keybundle for the product in the ATFA device.
+
+    Args:
+      event: The button click event.
+    """
+    try:
+      self.atft_manager.CheckDevice(self.atft_manager.atfa_dev)
+    except DeviceNotFoundException:
+      self._SendAlertEvent(self.ALERT_NO_ATFA)
+      return
+    if self._ShowWarning(self.ALERT_CONFIRM_PURGE_KEY):
+      self._CreateThread(self._PurgeKey)
+
   def OnProcessKey(self, event):
     """The async operation to ask ATFA device to process the stored keybundle.
 
@@ -1211,6 +1240,21 @@ class Atft(wx.Frame):
         return
 
     self.keys_left_display.SetLabelText('')
+
+  def _ShowWarning(self, text):
+    """Show a warning to the user.
+
+    Args:
+      text: The content of the warning.
+    Returns:
+      True if the user clicks yes, otherwise, False.
+    """
+    warning_dialog = wx.MessageDialog(
+        self, text,
+        self.DIALOG_WARNING_TITLE, style=wx.YES_NO | wx.ICON_EXCLAMATION)
+    if warning_dialog.ShowModal() == wx.ID_YES:
+      return True
+    return False
 
   def _CopyList(self, old_list):
     """Copy a device list.
@@ -1427,7 +1471,6 @@ class Atft(wx.Frame):
     Args:
       event: containing data of SelectFileArg type.
     """
-    # TODO(shanyu): Need to know the extension of the file from console.
     data = event.GetValue()
     message = data.message
     wildcard = data.wildcard
@@ -1436,11 +1479,12 @@ class Atft(wx.Frame):
         self,
         message,
         wildcard=wildcard,
-        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as file_dialog:
+        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST
+      ) as file_dialog:
       if file_dialog.ShowModal() == wx.ID_CANCEL:
         return  # the user changed their mind
       pathname = file_dialog.GetPath()
-      callback(pathname)
+    callback(pathname)
 
   def _LowKeyAlertEventHandler(self, event):
     """Show the alert box to alert user that the key in ATFA device is low.
@@ -1964,6 +2008,30 @@ class Atft(wx.Frame):
       self._HandleException('E', e, operation)
       self._SendAlertEvent(
           self.ALERT_UPDATE_FAILURE + e.msg.encode('utf-8'))
+      return
+    finally:
+      self.ResumeRefresh()
+
+  def _PurgeKey(self):
+    """Purge the key for the selected product in the ATFA device.
+    """
+    operation = 'ATFA purge key'
+    self._SendOperationStartEvent()
+    self.PauseRefresh()
+    try:
+      self.atft_manager.PurgeATFAKey()
+      self._SendOperationSucceedEvent(operation)
+    except ProductNotSpecifiedException as e:
+      self._HandleException('W', e, operation)
+      return
+    except DeviceNotFoundException as e:
+      e.SetMsg('No Available ATFA!')
+      self._HandleException('W', e, operation)
+      return
+    except FastbootFailure as e:
+      self._HandleException('E', e, operation)
+      self._SendAlertEvent(
+          self.ALERT_PURGE_KEY_FAILURE + e.msg.encode('utf-8'))
       return
     finally:
       self.ResumeRefresh()

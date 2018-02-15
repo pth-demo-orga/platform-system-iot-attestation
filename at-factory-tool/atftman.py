@@ -323,6 +323,9 @@ class AtftManager(object):
   def UpdateATFA(self):
     return self._atfa_dev_manager.Update()
 
+  def PurgeATFAKey(self):
+    return self._atfa_dev_manager.PurgeKey()
+
   def ListDevices(self, sort_by=SORT_BY_LOCATION):
     """Get device list.
 
@@ -1055,6 +1058,20 @@ class AtfaDeviceManager(object):
               'ATFA device response has invalid format')
 
     raise FastbootFailure('ATFA device response has invalid format')
+
+  def PurgeKey(self):
+    """Purge the key for the product
+
+    Raises:
+      DeviceNotFoundException: When the device is not found.
+      FastbootFailure: When fastboot command fails.
+      ProductNotSpecifiedException: When product is not specified.
+    """
+    if not self.atft_manager.product_info:
+      raise ProductNotSpecifiedException()
+    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
+    self.atft_manager.atfa_dev.Oem(
+        'purge ' + self.atft_manager.product_info.product_id)
 
   def SetTime(self):
     """Inject the host time into the ATFA device.
