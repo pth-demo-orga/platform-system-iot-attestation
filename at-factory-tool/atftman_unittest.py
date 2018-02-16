@@ -655,8 +655,8 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(test_device3, test_device1)
     self.assertNotEqual(test_device3, test_device2)
 
-  # Test AtfaDeviceManager.CheckStatus
-  def testCheckStatus(self):
+  # Test AtfaDeviceManager.UpdateKeysLeft
+  def UpdateKeysLeft(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
@@ -665,11 +665,11 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) 100\nTEST'
-    test_number = test_atfa_device_manager.CheckStatus()
+    test_number = test_atfa_device_manager.UpdateKeysLeft()
     mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
-    self.assertEqual(100, atft_manager.GetATFAKeysLeft())
+    self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
 
-  def testCheckStatusCRLF(self):
+  def testUpdateKeysLeftCRLF(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
@@ -678,11 +678,11 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\r\n(bootloader) 100\r\nTEST'
-    test_number = test_atfa_device_manager.CheckStatus()
+    test_number = test_atfa_device_manager.UpdateKeysLeft()
     mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
-    self.assertEqual(100, atft_manager.GetATFAKeysLeft())
+    self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
 
-  def testCheckStatusNoProductId(self):
+  def testUpdateKeysLeftNoProductId(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
@@ -691,9 +691,9 @@ class AtftManTest(unittest.TestCase):
     test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
     mock_atfa_dev.Oem.return_value = 'TEST\r\n(bootloader) 100\r\nTEST'
     with self.assertRaises(ProductNotSpecifiedException):
-      test_atfa_device_manager.CheckStatus()
+      test_atfa_device_manager.UpdateKeysLeft()
 
-  def testCheckStatusNoATFA(self):
+  def testUpdateKeysLeftNoATFA(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     atft_manager.atfa_dev = None
@@ -701,9 +701,9 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info.product_id = self.TEST_ID
     test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
     with self.assertRaises(DeviceNotFoundException):
-      test_atfa_device_manager.CheckStatus()
+      test_atfa_device_manager.UpdateKeysLeft()
 
-  def testCheckStatusInvalidFormat(self):
+  def testUpdateKeysLeftInvalidFormat(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
@@ -713,9 +713,9 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\nTEST'
     with self.assertRaises(FastbootFailure):
-      test_atfa_device_manager.CheckStatus()
+      test_atfa_device_manager.UpdateKeysLeft()
 
-  def testCheckStatusInvalidNumber(self):
+  def testUpdateKeysLeftInvalidNumber(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
@@ -725,7 +725,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) abcd\nTEST'
     with self.assertRaises(FastbootFailure):
-      test_atfa_device_manager.CheckStatus()
+      test_atfa_device_manager.UpdateKeysLeft()
 
   # Test AtftManager.CheckProvisionStatus
   def MockGetVar(self, variable):
