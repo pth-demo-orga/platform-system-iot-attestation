@@ -482,6 +482,7 @@ class AppSettingsDialog(wx.Dialog):
     self.settings_sizer = wx.BoxSizer(wx.VERTICAL)
 
     self._CreateUSBMappingPanel()
+    self._CreateLanguagePanel()
 
     panel_sizer.Add(self.settings_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
     self.panel_sizer = panel_sizer
@@ -493,6 +494,7 @@ class AppSettingsDialog(wx.Dialog):
     self.ShowUSBMappingSetting(None)
 
   def _CreateButtons(self):
+    """Add the save, cancel and save buttons."""
     buttons_sizer = wx.BoxSizer(wx.HORIZONTAL)
     button_cancel = wx.Button(
         self, label=self.atft.BUTTON_CANCEL, size=(130, 30), id=wx.ID_CANCEL)
@@ -519,8 +521,10 @@ class AppSettingsDialog(wx.Dialog):
     # Bind handlers
     self.button_map.Bind(wx.EVT_BUTTON, self.atft.MapUSBLocationToSlot)
     self.button_cancel.Bind(wx.EVT_BUTTON, self.OnExit)
+    self.button_save.Bind(wx.EVT_BUTTON, self.OnSaveSetting)
 
   def _CreateUSBMappingPanel(self):
+    """Create the panel for mapping USB location to UI slot."""
     menu_map_usb = wx.Button(
         self, label=self.atft.BUTTON_MAP_USB_LOCATION, style=wx.BORDER_NONE)
     menu_map_usb.Bind(wx.EVT_BUTTON, self.ShowUSBMappingSetting)
@@ -553,6 +557,36 @@ class AppSettingsDialog(wx.Dialog):
     usb_mapping_panel.SetSizerAndFit(usb_mapping_panel_sizer)
     self.usb_mapping_panel = usb_mapping_panel
     self.settings.append(self.usb_mapping_panel)
+
+  def _CreateLanguagePanel(self):
+    """Create the panel for setting language."""
+    menu_language = wx.Button(
+        self, label=self.atft.BUTTON_LANGUAGE_PREFERENCE, style=wx.BORDER_NONE)
+    menu_language.Bind(wx.EVT_BUTTON, self.ShowLanguageSetting)
+    self.menu_language = menu_language
+    self.AddMenuItem(self.menu_language)
+    language_setting = wx.Window(self, size=(0, 480))
+    language_setting.SetBackgroundColour(self.atft.COLOR_WHITE)
+    language_setting_sizer = wx.BoxSizer(wx.VERTICAL)
+    self.settings_sizer.Add(language_setting)
+    language_title = wx.StaticText(
+        language_setting, wx.ID_ANY, self.atft.TITLE_SELECT_LANGUAGE)
+    language_title_font = wx.Font(
+        14, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    language_title.SetFont(language_title_font)
+    language_setting_sizer.AddSpacer(10)
+    language_setting_sizer.Add(language_title, 0, wx.EXPAND | wx.LEFT, 20)
+    language_setting_sizer.AddSpacer(10)
+    language_setting_list = wx.ComboBox(
+        language_setting, wx.ID_ANY, style=wx.CB_READONLY | wx.CB_DROPDOWN,
+        value=self.atft.LANGUAGE_OPTIONS[self.atft.GetLanguageIndex()],
+        choices=self.atft.LANGUAGE_OPTIONS,
+        size=(250, 30))
+    language_setting_sizer.Add(language_setting_list, 0, wx.LEFT, 20)
+    language_setting.SetSizerAndFit(language_setting_sizer)
+    self.language_setting_list = language_setting_list
+    self.language_setting = language_setting
+    self.settings.append(self.language_setting)
 
   def AddMenuItem(self, menu_button):
     menu_button.SetFont(self.menu_font)
@@ -589,6 +623,19 @@ class AppSettingsDialog(wx.Dialog):
     self.current_menu = self.menu_map_usb
     self.ShowCurrentSetting()
 
+  def ShowLanguageSetting(self, event):
+    """Show the sub panel for language preference setting.
+
+    Args:
+      event: The triggering event.
+    """
+    self.button_save.Show()
+    self.button_map.Hide()
+    self.buttons_sizer.Layout()
+    self.current_setting = self.language_setting
+    self.current_menu = self.menu_language
+    self.ShowCurrentSetting()
+
   def ShowCurrentSetting(self):
     """Switch the setting page to the current chosen page."""
     for setting in self.settings:
@@ -599,6 +646,14 @@ class AppSettingsDialog(wx.Dialog):
     self.current_menu.SetFont(self.menu_font_bold)
     self.settings_sizer.Layout()
     self.panel_sizer.Layout()
+
+  def OnSaveSetting(self, event):
+    """The handler if user clicks save button."""
+    if self.current_setting == self.language_setting:
+      language_text = self.language_setting_list.GetValue().encode('utf-8')
+      self.atft.ChangeLanguage(language_text)
+      self.EndModal(0)
+      return
 
   def OnExit(self, event):
     """Exit handler when user clicks cancel or press 'esc'.
@@ -822,12 +877,10 @@ class Atft(wx.Frame):
     Returns:
       index: A index representing the language.
     """
-    index = 0
-    if self.LANGUAGE == 'eng':
-      index = 0
-    if self.LANGUAGE == 'cn':
-      index = 1
-    return index
+    for index in range(0, len(self.LANGUAGE_CONFIGS)):
+      if self.LANGUAGE == self.LANGUAGE_CONFIGS[index]:
+        return index
+    return -1
 
   def SetLanguage(self):
     """Set the string constants according to the language setting.
@@ -885,6 +938,7 @@ class Atft(wx.Frame):
         '这个目标设备位置将被关联到你插入ATFA设备的USB接口'][index]
     self.TITLE_FIRST_WARNING = ['1st\twarning: ', '警告一：'][index]
     self.TITLE_SECOND_WARNING = ['2nd\twarning: ', '警告二：'][index]
+    self.TITLE_SELECT_LANGUAGE = ['Select a language', '选择一种语言'][index]
 
     # Field names
     self.FIELD_SERIAL_NUMBER = ['SN', '序列号'][index]
@@ -915,6 +969,7 @@ class Atft(wx.Frame):
     self.BUTTON_ENTER_SUP_MODE = ['Enter Supervisor Mode', '进入管理模式'][index]
     self.BUTTON_LEAVE_SUP_MODE = ['Leave Supervisor Mode', '离开管理模式'][index]
     self.BUTTON_MAP_USB_LOCATION = ['Map USB Locations', '关联USB位置'][index]
+    self.BUTTON_LANGUAGE_PREFERENCE = ['Language Preference', '语言偏好'][index]
     self.BUTTON_REMAP = ['Remap', '重新关联'][index]
     self.BUTTON_MAP = ['Map', '关联'][index]
     self.BUTTON_CANCEL = ['Cancel', '取消'][index]
@@ -1062,6 +1117,12 @@ class Atft(wx.Frame):
         'Are you sure you want to purge all the keys for this product?\n'
         'The keys would be purged permanently!!!',
         '你确定要清楚密钥吗？\n设备中的密钥将永久丢失！！！'][index]
+    # This variable is intentionally a list instead of a string since we need
+    # to show the correct message after language setting is changed.
+    self.ALERT_LANGUAGE_RESTART = [
+        'The language setting would take effect after you restart the '
+        'application.',
+        '语言设置将在下次重启程序后生效。']
 
     self.STATUS_MAPPED = ['Mapped', '已关联位置'][index]
     self.STATUS_NOT_MAPPED = ['Not mapped', '未关联位置'][index]
@@ -1889,6 +1950,7 @@ class Atft(wx.Frame):
       self.statusbar.Show()
     else:
       self.statusbar.Hide()
+    self.SetSize(self.GetWindowSize())
 
   class SelectFileArg(object):
     """The argument structure for SelectFileHandler.
@@ -1960,7 +2022,6 @@ class Atft(wx.Frame):
     except ProductAttributesFileFormatError as e:
       self._SendAlertEvent(self.ALERT_PRODUCT_FILE_FORMAT_WRONG)
       self._HandleException('W', e)
-
 
   def OnChangeKeyThreshold(self, event):
     """Change the threshold for low number of key warning.
@@ -3339,6 +3400,18 @@ class Atft(wx.Frame):
     self.wait_atfa_callback.Release()
     self.wait_atfa_callback = None
 
+  def ChangeLanguage(self, language_text):
+    """Change the language setting according to the selected language name.
+
+    Args:
+      language_text: The name of the language selected.
+    """
+    for i in range(0, len(self.LANGUAGE_OPTIONS)):
+      if self.LANGUAGE_OPTIONS[i] == language_text:
+        self.LANGUAGE = self.LANGUAGE_CONFIGS[i]
+        self._SendAlertEvent(
+            self.ALERT_LANGUAGE_RESTART[self.GetLanguageIndex()])
+        break
 
 
 def main():
