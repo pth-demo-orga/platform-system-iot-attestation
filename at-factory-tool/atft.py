@@ -390,6 +390,7 @@ class Atft(wx.Frame):
     self.LANGUAGE = 'eng'
     self.REBOOT_TIMEOUT = 0
     self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = '*.atpa'
+    self.UPDATE_FILE_EXTENSION = '*.upd'
 
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
     if not os.path.exists(config_file_path):
@@ -412,6 +413,7 @@ class Atft(wx.Frame):
       self.REBOOT_TIMEOUT = float(configs['REBOOT_TIMEOUT'])
       self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = str(
           configs['PRODUCT_ATTRIBUTE_FILE_EXTENSION'])
+      self.UPDATE_FILE_EXTENSION = str(configs['UPDATE_FILE_EXTENSION'])
     except (KeyError, ValueError):
       return None
 
@@ -467,12 +469,12 @@ class Atft(wx.Frame):
     self.MENU_KEY_PROVISIONING = ['Key Provisioning', '密钥传输'][index]
     self.MENU_ATFA_DEVICE = ['ATFA Device', 'ATFA 管理'][index]
     self.MENU_AUDIT = ['Audit', '审计'][index]
+    self.MENU_DOWNLOAD_AUDIT = ['Download Audit File', '下载审计文件'][index]
     self.MENU_KEY_MANAGEMENT = ['Key Management', '密钥管理'][index]
 
     # Second level menus
     self.MENU_CLEAR_COMMAND = ['Clear Command Output', '清空控制台'][index]
     self.MENU_SHOW_STATUS_BAR = ['Show Statusbar', '显示状态栏'][index]
-    self.MENU_SHOW_TOOL_BAR = ['Show Toolbar', '显示工具栏'][index]
     self.MENU_CHOOSE_PRODUCT = ['Choose Product', '选择产品'][index]
     self.MENU_QUIT = ['quit', '退出'][index]
 
@@ -486,6 +488,7 @@ class Atft(wx.Frame):
     self.MENU_STORAGE = ['Storage Mode', 'U盘模式'][index]
 
     self.MENU_ATFA_STATUS = ['ATFA Status', '查询余量'][index]
+    self.MENU_ATFA_UPDATE = ['Update', '升级'][index]
     self.MENU_KEY_THRESHOLD = ['Key Warning Threshold', '密钥警告阈值'][index]
     self.MENU_REBOOT = ['Reboot', '重启'][index]
     self.MENU_SHUTDOWN = ['Shutdown', '关闭'][index]
@@ -493,25 +496,20 @@ class Atft(wx.Frame):
     self.MENU_STOREKEY = ['Store Key Bundle', '存储密钥打包文件'][index]
     self.MENU_PROCESSKEY = ['Process Key Bundle', '处理密钥打包文件'][index]
 
-    # Toolbar icon names
-    self.TOOLBAR_AUTO_PROVISION = ['Automatic Provision', '自动模式'][index]
-    self.TOOLBAR_ATFA_STATUS = self.MENU_ATFA_STATUS
-    self.TOOLBAR_CLEAR_COMMAND = self.MENU_CLEAR_COMMAND
-
     # Title
     self.TITLE = ['Google Android Things Factory Tool',
                   'Google Android Things 工厂程序'][index]
 
     # Area titles
-    self.TITLE_ATFA_DEV = ['Atfa Device', 'ATFA 设备'][index]
-    self.TITLE_PRODUCT_NAME = ['Product:', '产品：'][index]
+    self.TITLE_ATFA_DEV = ['ATFA Device: ', 'ATFA 设备： '][index]
+    self.TITLE_PRODUCT_NAME = ['Product: ', '产品： '][index]
     self.TITLE_PRODUCT_NAME_NOTCHOSEN = ['Not Chosen', '未选择'][index]
     self.TITLE_KEYS_LEFT = ['Attestation Keys Left:', '剩余密钥:'][index]
     self.TITLE_TARGET_DEV = ['Target Devices', '目标设备'][index]
     self.TITLE_COMMAND_OUTPUT = ['Command Output', '控制台输出'][index]
 
     # Field names
-    self.FIELD_SERIAL_NUMBER = ['Serial Number', '序列号'][index]
+    self.FIELD_SERIAL_NUMBER = ['SN', '序列号'][index]
     self.FIELD_USB_LOCATION = ['USB Location', '插入位置'][index]
     self.FIELD_STATUS = ['Status', '状态'][index]
     self.FIELD_SERIAL_WIDTH = 200
@@ -529,18 +527,14 @@ class Atft(wx.Frame):
     self.DIALOG_ALERT_TITLE = ['Alert', '警告'][index]
     self.DIALOG_CHOOSE_PRODUCT_ATTRIBUTE_FILE = [
         'Choose Product Attributes File', '选择产品文件'][index]
+    self.DIALOG_CHOOSE_UPDATE_FILE = [
+        'Choose Update Patch File', '选择升级补丁文件'][index]
 
     # Buttons
     self.BUTTON_TARGET_DEV_TOGGLE_SORT = ['target_device_sort_button',
                                      '目标设备排序按钮'][index]
 
     # Alerts
-    self.ALERT_AUTO_PROV_NO_ATFA = [
-        'Cannot enter auto provision mode\nNo ATFA device available!',
-        '无法开启自动模式\n没有可用的ATFA设备！'][index]
-    self.ALERT_AUTO_PROV_NO_PRODUCT = [
-        'Cannot enter auto provision mode\nNo product specified!',
-        '无法开启自动模式\n没有选择产品！'][index]
     self.ALERT_PROV_NO_SELECTED = [
         "Can't Provision! No target device selected!",
         '无法传输密钥！目标设备没有选择！'][index]
@@ -605,6 +599,9 @@ class Atft(wx.Frame):
         'Detected an ATFA device having incompatible version with this tool, '
         'please upgrade your ATFA device to the latest version!',
         '检测到一个与这个软件不兼容的ATFA设备，请升级你的ATFA设备！'][index]
+    self.ALERT_UPDATE_FAILURE = [
+        'Update ATFA failed, Error: ',
+        '升级ATFA设备失败！错误信息：'][index]
 
 
   def InitializeUI(self):
@@ -614,10 +611,11 @@ class Atft(wx.Frame):
     wx.Frame.__init__(self, None, style=style)
 
     # Menu:
-    # Application   -> Clear Command Output
-    #               -> Show Statusbar
-    #               -> Show Toolbar
+    # Application   -> App Settings
     #               -> Choose Product
+    #               -> Key Warning Threshold
+    #               -> Clear Command Output
+    #               -> Show Statusbar
     #               -> Quit
 
     # Key Provision -> Fuse Bootloader Vboot Key
@@ -626,15 +624,15 @@ class Atft(wx.Frame):
     #               -> Provision Key
 
     # ATFA Device   -> ATFA Status
-    #               -> Key Warning Threshold
+    #               -> Registration
+    #               -> Update
     #               -> Reboot
     #               -> Shutdown
 
-    # Audit         -> Storage Mode
-    #               -> ???
+    # Audit         -> Download Audit File
 
     # Key Management-> Store Key Bundle
-    #               -> Process Key Bundle
+    #               -> Purge Key Bundle
 
     # Add Menu items to Menubar
     self.menubar = wx.MenuBar()
@@ -659,11 +657,6 @@ class Atft(wx.Frame):
         wx.ID_ANY, self.MENU_SHOW_STATUS_BAR, kind=wx.ITEM_CHECK)
     self.app_menu.Check(self.menu_show_status_bar.GetId(), True)
     self.Bind(wx.EVT_MENU, self.ToggleStatusBar, self.menu_show_status_bar)
-
-    self.menu_show_tool_bar = self.app_menu.Append(
-        wx.ID_ANY, self.MENU_SHOW_TOOL_BAR, kind=wx.ITEM_CHECK)
-    self.app_menu.Check(self.menu_show_tool_bar.GetId(), True)
-    self.Bind(wx.EVT_MENU, self.ToggleToolBar, self.menu_show_tool_bar)
 
     self.menu_choose_product = self.app_menu.Append(
         wx.ID_ANY, self.MENU_CHOOSE_PRODUCT)
@@ -699,6 +692,9 @@ class Atft(wx.Frame):
         wx.ID_ANY, self.MENU_KEY_THRESHOLD)
     self.Bind(wx.EVT_MENU, self.OnChangeKeyThreshold, menu_key_threshold)
 
+    menu_update = self.atfa_menu.Append(wx.ID_ANY, self.MENU_ATFA_UPDATE)
+    self.Bind(wx.EVT_MENU, self.OnUpdateAtfa, menu_update)
+
     menu_reboot = self.atfa_menu.Append(wx.ID_ANY, self.MENU_REBOOT)
     self.Bind(wx.EVT_MENU, self.OnReboot, menu_reboot)
 
@@ -712,34 +708,6 @@ class Atft(wx.Frame):
     self.Bind(wx.EVT_MENU, self.OnProcessKey, menu_processkey)
 
     self.SetMenuBar(self.menubar)
-
-    # Toolbar buttons
-    # -> 'Automatic Provision'
-    # -> 'Refresh Devices'
-    # -> 'Manual Provision'
-    # -> 'ATFA Status'
-    # -> 'Clear Command Output'
-    self.toolbar = self.CreateToolBar()
-    self.tools = []
-    toolbar_auto_provision = self.toolbar.AddCheckTool(
-        self.ID_TOOL_PROVISION, self.TOOLBAR_AUTO_PROVISION,
-        wx.Bitmap('rocket.png'))
-    self.Bind(wx.EVT_TOOL, self.OnToggleAutoProv, toolbar_auto_provision)
-    self.toolbar_auto_provision = toolbar_auto_provision
-
-    toolbar_atfa_status = self.toolbar.AddTool(
-        wx.ID_ANY, self.TOOLBAR_ATFA_STATUS, wx.Bitmap('pie-chart.png'))
-    self.Bind(wx.EVT_TOOL, self.OnCheckATFAStatus, toolbar_atfa_status)
-
-    toolbar_clear_command = self.toolbar.AddTool(
-        self.ID_TOOL_CLEAR, self.TOOLBAR_CLEAR_COMMAND, wx.Bitmap('eraser.png'))
-    self.Bind(wx.EVT_TOOL, self.OnClearCommandWindow, toolbar_clear_command)
-
-    self.tools.append(toolbar_auto_provision)
-    self.tools.append(toolbar_atfa_status)
-    self.tools.append(toolbar_clear_command)
-    self.tools.append(toolbar_atfa_status)
-    self.tools.append(toolbar_clear_command)
 
     # The main panel
     self.panel = wx.Panel(self)
@@ -832,7 +800,6 @@ class Atft(wx.Frame):
     self.vbox.Add(self.cmd_output, 0, wx.ALL | wx.EXPAND, 5)
 
     self.panel.SetSizer(self.vbox)
-    self.toolbar.Realize()
     self.statusbar = self.CreateStatusBar()
     self.statusbar.SetStatusText('Ready')
     self.SetSize((800, 720))
@@ -993,62 +960,7 @@ class Atft(wx.Frame):
     Args:
       event: The triggering event.
     """
-    self.auto_prov = self.toolbar_auto_provision.IsToggled()
-    # If no available ATFA device.
-    if self.auto_prov and not self.atft_manager.atfa_dev:
-      self.auto_prov = False
-      self.toolbar.ToggleTool(self.ID_TOOL_PROVISION, False)
-      self._SendAlertEvent(self.ALERT_AUTO_PROV_NO_ATFA)
-      return
-
-    # If no product specified.
-    if self.auto_prov and not self.atft_manager.product_info:
-      self.auto_prov = False
-      self.toolbar.ToggleTool(self.ID_TOOL_PROVISION, False)
-      self._SendAlertEvent(self.ALERT_AUTO_PROV_NO_PRODUCT)
-      return
-
-    self._ToggleToolbarMenu(self.auto_prov)
-
-    if self.auto_prov:
-      # Enter auto provisioning mode.
-
-      # Reset the low key alert shown indicator
-      self.low_key_alert_shown = False
-      message = 'Automatic key provisioning start'
-      self.PrintToCommandWindow(message)
-      self.log.Info('Autoprov', message)
-    else:
-      # Leave auto provisioning mode.
-      for device in self.atft_manager.target_devs:
-        # Change all waiting devices' status to it's original state.
-        if device.provision_status == ProvisionStatus.WAITING:
-          self.atft_manager.CheckProvisionStatus(device)
-      message = 'Automatic key provisioning end'
-      self.PrintToCommandWindow(message)
-      self.log.Info('Autoprov', message)
-
-  def _ToggleToolbarMenu(self, auto_prov):
-    """Disable/Enable buttons and menu items while entering/leaving auto mode.
-
-    Args:
-      auto_prov: Whether entering auto provisioning mode(True) or
-        leaving(False).
-    """
-    for tool in self.tools:
-      tool_id = tool.GetId()
-      if tool_id != self.ID_TOOL_PROVISION and tool_id != self.ID_TOOL_CLEAR:
-        if self.auto_prov:
-          self.toolbar.EnableTool(tool_id, False)
-        else:
-          self.toolbar.EnableTool(tool_id, True)
-
-    # Disable menu items.
-    for i in range(0, len(self.menubar.GetMenus())):
-      if self.auto_prov:
-        self.menubar.EnableTop(i, False)
-      else:
-        self.menubar.EnableTop(i, True)
+    pass
 
   def OnManualProvision(self, event):
     """Manual provision key asynchronously.
@@ -1140,17 +1052,6 @@ class Atft(wx.Frame):
     else:
       self.statusbar.Hide()
 
-  def ToggleToolBar(self, event):
-    """Toggle the tool bar.
-
-    Args:
-      event: The triggering event.
-    """
-    if self.menu_show_tool_bar.IsChecked():
-      self.toolbar.Show()
-    else:
-      self.toolbar.Hide()
-
   class SelectFileArg(object):
     """The argument structure for SelectFileHandler.
 
@@ -1229,6 +1130,28 @@ class Atft(wx.Frame):
       event: The button click event.
     """
     self.OnStorageMode(event)
+
+  def OnUpdateAtfa(self, event):
+    """Store the update file to the ATFA device and process it.
+
+    Give user a prompt to choose an update patch file and then upload that
+    file to the ATFA device and process it.
+
+    Args:
+      event: The button click event.
+    """
+    try:
+      self.atft_manager.CheckDevice(self.atft_manager.atfa_dev)
+    except DeviceNotFoundException:
+      self._SendAlertEvent(self.ALERT_NO_ATFA)
+      return
+
+    message = self.DIALOG_CHOOSE_UPDATE_FILE
+    wildcard = self.UPDATE_FILE_EXTENSION
+    callback = self._UpdateATFA
+    data = self.SelectFileArg(message, wildcard, callback)
+    event = Event(self.select_file_event, value=data)
+    wx.QueueEvent(self, event)
 
   def OnProcessKey(self, event):
     """The async operation to ask ATFA device to process the stored keybundle.
@@ -1473,7 +1396,6 @@ class Atft(wx.Frame):
     if self.auto_prov and not self.atft_manager.atfa_dev:
       # If ATFA unplugged during auto mode,
       # exit the mode with an alert.
-      self.toolbar.ToggleTool(self.ID_TOOL_PROVISION, False)
       self.OnToggleAutoProv(None)
       self._SendAlertEvent(self.ALERT_ATFA_UNPLUG)
 
@@ -1987,7 +1909,6 @@ class Atft(wx.Frame):
         if self.atft_manager.GetATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
-          self.toolbar.ToggleTool(self.ID_TOOL_PROVISION, False)
           self.OnToggleAutoProv(None)
       break
     self.auto_dev_serials.remove(serial)
@@ -2017,6 +1938,35 @@ class Atft(wx.Frame):
     # Check ATFA status after new key stored.
     if self.atft_manager.product_info:
       self._CheckATFAStatus()
+
+  def _UpdateATFA(self, pathname):
+    """Ask ATFA device to store and process the stored keybundle.
+
+    Args:
+      pathname: The path name to the key bundle file.
+    """
+    operation = 'Update ATFA device'
+    self._SendOperationStartEvent(operation)
+    self.PauseRefresh()
+    try:
+      self.atft_manager.atfa_dev.Download(pathname)
+      self.atft_manager.UpdateATFA()
+      self._SendOperationSucceedEvent(operation)
+
+      # Check ATFA status after update succeeds.
+      if self.atft_manager.product_info:
+        self._CheckATFAStatus()
+    except DeviceNotFoundException as e:
+      e.SetMsg('No Available ATFA!')
+      self._HandleException('W', e, operation)
+      return
+    except FastbootFailure as e:
+      self._HandleException('E', e, operation)
+      self._SendAlertEvent(
+          self.ALERT_UPDATE_FAILURE + e.msg.encode('utf-8'))
+      return
+    finally:
+      self.ResumeRefresh()
 
   def _GetSelectedSerials(self):
     """Get the list of selected serial numbers in the device list.
