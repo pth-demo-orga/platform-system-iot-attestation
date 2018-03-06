@@ -16,44 +16,70 @@
 """Exceptions for At-Factory-Tool Manager (atftman)."""
 
 
-class DeviceNotFoundException(Exception):
+class AtftBaseException(Exception):
 
   def __init__(self):
     Exception.__init__(self)
+
+  def __str__(self):
+    if self.msg:
+      return self.msg
+    return ''
+
+
+class DeviceNotFoundException(AtftBaseException):
+
+  def __init__(self):
+    AtftBaseException.__init__(self)
     self.msg = 'Device Not Found!'
 
   def SetMsg(self, msg):
     self.msg = msg
 
-  def __str__(self):
-    return self.msg
 
-
-class NoAlgorithmAvailableException(Exception):
+class NoAlgorithmAvailableException(AtftBaseException):
   pass
 
 
-class FastbootFailure(Exception):
+class FastbootFailure(AtftBaseException):
 
   def __init__(self, msg):
-    Exception.__init__(self)
+    AtftBaseException.__init__(self)
     self.msg = msg
 
-  def __str__(self):
-    return self.msg
+
+class ProductNotSpecifiedException(AtftBaseException):
+
+  def __init__(self):
+    AtftBaseException.__init__(self)
+    self.msg = 'Product Attribute File Not Selected!'
 
 
-class ProductNotSpecifiedException(Exception):
-
-  def __str__(self):
-    return 'Product Attribute File Not Selected!'
-
-
-class ProductAttributesFileFormatError(Exception):
+class ProductAttributesFileFormatError(AtftBaseException):
 
   def __init__(self, msg):
-    Exception.__init__(self)
+    AtftBaseException.__init__(self)
     self.msg = msg
 
-  def __str__(self):
-    return self.msg
+
+class DeviceCreationException(AtftBaseException):
+
+  def __init__(self, msg, device):
+    AtftBaseException.__init__(self)
+    self.device = device
+    self.msg = 'Error while creating new device, fastboot error:' + msg
+
+
+class OsVersionNotAvailableException(AtftBaseException):
+
+  def __init__(self, device):
+    AtftBaseException.__init__(self)
+    self.device = device
+
+
+class OsVersionNotCompatibleException(AtftBaseException):
+
+  def __init__(self, device, version):
+    AtftBaseException.__init__(self)
+    self.device = device
+    self.version = version
