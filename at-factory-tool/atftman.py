@@ -320,6 +320,9 @@ class AtftManager(object):
   def ProcessATFAKey(self):
     return self._atfa_dev_manager.ProcessKey()
 
+  def UpdateATFA(self):
+    return self._atfa_dev_manager.Update()
+
   def ListDevices(self, sort_by=SORT_BY_LOCATION):
     """Get device list.
 
@@ -526,6 +529,8 @@ class AtftManager(object):
 
     Args:
       target_dev: The target device (DeviceInfo).
+    Raises:
+      FastbootFailure: When fastboot command fails.
     """
     at_attest_uuid = target_dev.GetVar('at-attest-uuid')
     state_string = target_dev.GetVar('at-vboot-state')
@@ -581,6 +586,8 @@ class AtftManager(object):
     Args:
       src: The source device to be copied from.
       dst: The destination device to be copied to.
+    Raises:
+      FastbootFailure: When fastboot command fails.
     """
     # create a tmp folder
     tmp_folder = tempfile.mkdtemp()
@@ -663,6 +670,9 @@ class AtftManager(object):
 
     Args:
       target: The target device.
+    Raises:
+      FastbootFailure: When fastboot command fails.
+      ProductNotSpecified Exception: When product is not specified.
     """
     if not self.product_info:
       target.provision_status = ProvisionStatus.FUSEVBOOT_FAILED
@@ -697,6 +707,9 @@ class AtftManager(object):
 
     Args:
       target: The target device.
+    Raises:
+      FastbootFailure: When fastboot command fails.
+      ProductNotSpecified Exception: When product is not specified.
     """
     if not self.product_info:
       target.provision_status = ProvisionStatus.FUSEATTR_FAILED
@@ -724,6 +737,8 @@ class AtftManager(object):
 
     Args:
       target: The target device.
+    Raises:
+      FastbootFailure: When fastboot command fails.
     """
     try:
       target.provision_status = ProvisionStatus.LOCKAVB_ING
@@ -745,6 +760,8 @@ class AtftManager(object):
         successfully.
       timeout_callback: The callback function called when the device reboots
         timeout.
+    Raises:
+      FastbootFailure: When fastboot command fails.
 
     The device would disappear from the list after reboot.
     If we see the device again within timeout, call the success_callback,
@@ -787,6 +804,8 @@ class AtftManager(object):
       success: Whether this is the success callback.
     Returns:
       An extended callback function.
+    Raises:
+      FastbootFailure: When fastboot command fails.
     """
     def RebootCallbackFunc(callback=callback, serial=serial, success=success):
       try:
@@ -951,9 +970,10 @@ class AtfaDeviceManager(object):
 
     Raises:
       DeviceNotFoundException: When the device is not found.
+      FastbootFailure: When fastboot command fails.
     """
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    self.atft_manager.atfa_dev.Oem('serial')
+    return self.atft_manager.atfa_dev.GetVar('serial')
 
   def SwitchStorage(self):
     """Switch the ATFA device to storage mode.
@@ -974,6 +994,17 @@ class AtfaDeviceManager(object):
     self.SetTime()
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     self.atft_manager.atfa_dev.Oem('process-keybundle')
+
+  def Update(self):
+    """Update the ATFA device.
+
+    Raises:
+      DeviceNotFoundException: When the device is not found.
+      FastbootFailure: When fastboot command fails.
+    """
+    # Set time would check atfa_dev device.
+    self.SetTime()
+    self.atft_manager.atfa_dev.Oem('update')
 
   def Reboot(self):
     """Reboot the ATFA device.
