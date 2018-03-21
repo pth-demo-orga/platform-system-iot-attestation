@@ -391,6 +391,7 @@ class Atft(wx.Frame):
     self.REBOOT_TIMEOUT = 0
     self.ATFA_REBOOT_TIMEOUT = 0
     self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = '*.atpa'
+    self.KEY_FILE_EXTENSION = '*.atfa'
     self.UPDATE_FILE_EXTENSION = '*.upd'
 
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
@@ -414,6 +415,7 @@ class Atft(wx.Frame):
       self.REBOOT_TIMEOUT = float(configs['REBOOT_TIMEOUT'])
       self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = str(
           configs['PRODUCT_ATTRIBUTE_FILE_EXTENSION'])
+      self.KEY_FILE_EXTENSION = str(configs['KEY_FILE_EXTENSION'])
       self.UPDATE_FILE_EXTENSION = str(configs['UPDATE_FILE_EXTENSION'])
     except (KeyError, ValueError):
       return None
@@ -486,8 +488,6 @@ class Atft(wx.Frame):
     self.MENU_MANUAL_LOCK_AVB = ['Lock Android Verified Boot', '锁定AVB'][index]
     self.MENU_MANUAL_PROV = ['Provision Key', '传输密钥'][index]
 
-    self.MENU_STORAGE = ['Storage Mode', 'U盘模式'][index]
-
     self.MENU_ATFA_STATUS = ['ATFA Status', '查询余量'][index]
     self.MENU_ATFA_UPDATE = ['Update', '升级'][index]
     self.MENU_KEY_THRESHOLD = ['Key Warning Threshold', '密钥警告阈值'][index]
@@ -531,6 +531,7 @@ class Atft(wx.Frame):
     self.DIALOG_WARNING_TITLE = ['Warning', '警告'][index]
     self.DIALOG_CHOOSE_PRODUCT_ATTRIBUTE_FILE = [
         'Choose Product Attributes File', '选择产品文件'][index]
+    self.DIALOG_CHOOSE_KEY_FILE = ['Choose Key File', '选择密钥文件'][index]
     self.DIALOG_CHOOSE_UPDATE_FILE = [
         'Choose Update Patch File', '选择升级补丁文件'][index]
     self.DIALOG_SELECT_DIRECTORY = ['Select directory', '选择文件夹'][index]
@@ -613,6 +614,9 @@ class Atft(wx.Frame):
         'Detected an ATFA device having incompatible version with this tool, '
         'please upgrade your ATFA device to the latest version!',
         '检测到一个与这个软件不兼容的ATFA设备，请升级你的ATFA设备！'][index]
+    self.ALERT_PROCESS_KEY_FAILURE = [
+        'Process key failed, Error: ',
+        '处理密钥文件失败！错误信息：'][index]
     self.ALERT_UPDATE_FAILURE = [
         'Update ATFA failed, Error: ',
         '升级ATFA设备失败！错误信息：'][index]
@@ -713,8 +717,6 @@ class Atft(wx.Frame):
     self.Bind(wx.EVT_MENU, self.OnManualProvision, menu_manual_prov)
 
     # Audit Menu Options
-    menu_storage = self.audit_menu.Append(wx.ID_ANY, self.MENU_STORAGE)
-    self.Bind(wx.EVT_MENU, self.OnStorageMode, menu_storage)
     menu_download_audit = self.audit_menu.Append(
         wx.ID_ANY, self.MENU_DOWNLOAD_AUDIT)
     self.Bind(wx.EVT_MENU, self.OnGetAuditFile, menu_download_audit)
@@ -738,8 +740,6 @@ class Atft(wx.Frame):
     # Key Management Menu Options
     menu_storekey = self.key_menu.Append(wx.ID_ANY, self.MENU_STOREKEY)
     self.Bind(wx.EVT_MENU, self.OnStoreKey, menu_storekey)
-    menu_processkey = self.key_menu.Append(wx.ID_ANY, self.MENU_PROCESSKEY)
-    self.Bind(wx.EVT_MENU, self.OnProcessKey, menu_processkey)
 
     menu_purgekey = self.key_menu.Append(wx.ID_ANY, self.MENU_PURGE)
     self.Bind(wx.EVT_MENU, self.OnPurgeKey, menu_purgekey)
@@ -953,14 +953,6 @@ class Atft(wx.Frame):
 
     self._CreateThread(self._ListDevices)
 
-  def OnStorageMode(self, event):
-    """Switch ATFA device to storage mode asynchronously.
-
-    Args:
-      event: The triggering event.
-    """
-    self._CreateThread(self._SwitchStorageMode)
-
   def OnReboot(self, event):
     """Reboot ATFA device asynchronously.
 
@@ -1104,6 +1096,20 @@ class Atft(wx.Frame):
       self.wildcard = wildcard
       self.callback = callback
 
+  class SaveFileArg(object):
+    """The argument structure for SaveFileHandler.
+
+    Attributes:
+      message: The message for the select file window.
+      filename: The filename of the file to be saved to.
+      callback: The callback to be called once the file is selected with
+        argument pathname of the selected file.
+    """
+    def __init__(self, message, filename, callback):
+      self.message = message
+      self.filename = filename
+      self.callback = callback
+
   def ChooseProduct(self, event):
     """Ask user to choose the product attributes file.
 
@@ -1195,12 +1201,26 @@ class Atft(wx.Frame):
     wx.QueueEvent(self, event)
 
   def OnStoreKey(self, event):
-    """Store the keybundle to the ATFA device.
+    """Upload the key bundle file to ATFA device and process it.
+
+    Give user a prompt to choose a keybundle file then upload that file
+    to the ATFA device and process it.
 
     Args:
       event: The button click event.
     """
-    self.OnStorageMode(event)
+    try:
+      self.atft_manager.CheckDevice(self.atft_manager.atfa_dev)
+    except DeviceNotFoundException:
+      self._SendAlertEvent(self.ALERT_NO_ATFA)
+      return
+
+    message = self.DIALOG_CHOOSE_KEY_FILE
+    wildcard = self.KEY_FILE_EXTENSION
+    callback = self._ProcessKey
+    data = self.SelectFileArg(message, wildcard, callback)
+    event = Event(self.select_file_event, value=data)
+    wx.QueueEvent(self, event)
 
   def OnUpdateAtfa(self, event):
     """Store the update file to the ATFA device and process it.
@@ -1898,27 +1918,6 @@ class Atft(wx.Frame):
         # If the confirmed number is lower than threshold, fire low key event.
         self._SendLowKeyAlertEvent()
 
-  def _SwitchStorageMode(self):
-    """Switch ATFA device to storage mode.
-    """
-    operation = 'Switch ATFA device to Storage Mode'
-    self._SendOperationStartEvent(operation)
-    self.PauseRefresh()
-
-    try:
-      self.atft_manager.SwitchATFAStorage()
-    except DeviceNotFoundException as e:
-      e.SetMsg('No Available ATFA!')
-      self._HandleException('W', e, operation)
-      return
-    except FastbootFailure as e:
-      self._HandleException('E', e, operation, self.atft_manager.atfa_dev)
-      return
-    finally:
-      self.ResumeRefresh()
-
-    self._SendOperationSucceedEvent(operation)
-
   def _Reboot(self):
     """Reboot ATFA device.
     """
@@ -2055,30 +2054,34 @@ class Atft(wx.Frame):
     self.auto_dev_serials.remove(serial)
     self.auto_prov_lock.release()
 
-  def _ProcessKey(self):
-    """Ask ATFA device to process the stored keybundle.
+  def _ProcessKey(self, pathname):
+    """Ask ATFA device to store and process the stored keybundle.
+
+    Args:
+      pathname: The path name to the key bundle file.
     """
-    operation = 'ATFA device process key bundle'
+    operation = 'ATFA device store and process key bundle'
     self._SendOperationStartEvent(operation)
     self.PauseRefresh()
-
     try:
+      self.atft_manager.atfa_dev.Download(pathname)
       self.atft_manager.ProcessATFAKey()
+      self._SendOperationSucceedEvent(operation)
+
+      # Check ATFA status after new key stored.
+      if self.atft_manager.product_info:
+        self._UpdateKeysLeftInATFA()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException('W', e, operation)
       return
     except FastbootFailure as e:
       self._HandleException('E', e, operation)
+      self._SendAlertEvent(
+          self.ALERT_PROCESS_KEY_FAILURE + e.msg.encode('utf-8'))
       return
     finally:
       self.ResumeRefresh()
-
-    self._SendOperationSucceedEvent(operation)
-
-    # Check ATFA status after new key stored.
-    if self.atft_manager.product_info:
-      self._UpdateKeysLeftInATFA()
 
   def _UpdateATFA(self, pathname):
     """Ask ATFA device to store and process the stored keybundle.
