@@ -37,8 +37,11 @@ from fastboot_exceptions import FastbootFailure
 from fastboot_exceptions import NoKeysException
 from fastboot_exceptions import OsVersionNotAvailableException
 from fastboot_exceptions import OsVersionNotCompatibleException
+from fastboot_exceptions import PasswordErrorException
 from fastboot_exceptions import ProductAttributesFileFormatError
 from fastboot_exceptions import ProductNotSpecifiedException
+
+from passlib.hash import pbkdf2_sha256
 
 import wx
 
@@ -483,6 +486,7 @@ class AppSettingsDialog(wx.Dialog):
 
     self._CreateUSBMappingPanel()
     self._CreateLanguagePanel()
+    self._CreatePasswordPanel()
 
     panel_sizer.Add(self.settings_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
     self.panel_sizer = panel_sizer
@@ -588,6 +592,62 @@ class AppSettingsDialog(wx.Dialog):
     self.language_setting = language_setting
     self.settings.append(self.language_setting)
 
+  def _CreatePasswordPanel(self):
+    menu_set_password = wx.Button(
+        self, label=self.atft.BUTTON_SET_PASSWORD, style=wx.BORDER_NONE)
+    menu_set_password.Bind(wx.EVT_BUTTON, self.ShowPasswordSetting)
+    self.menu_set_password = menu_set_password
+    self.AddMenuItem(self.menu_set_password)
+    password_setting = wx.Window(self, size=(0, 480))
+    password_setting.SetBackgroundColour(self.atft.COLOR_WHITE)
+    password_setting_sizer = wx.BoxSizer(wx.VERTICAL)
+    password_middle_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    self.settings_sizer.Add(password_setting, 0, wx.EXPAND)
+    original_password_title = wx.StaticText(
+        password_setting, wx.ID_ANY, self.atft.DIALOG_ORIG_PASSWORD)
+    original_password_title_sizer = wx.BoxSizer(wx.VERTICAL)
+    original_password_title_sizer.SetMinSize(0, 30)
+    original_password_title_sizer.Add(original_password_title)
+    new_password_title = wx.StaticText(
+        password_setting, wx.ID_ANY, self.atft.DIALOG_NEW_PASSWORD)
+    new_password_title_sizer = wx.BoxSizer(wx.VERTICAL)
+    new_password_title_sizer.SetMinSize(0, 30)
+    new_password_title_sizer.Add(new_password_title)
+    password_title_font = wx.Font(
+        12, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    original_password_title.SetFont(password_title_font)
+    new_password_title.SetFont(password_title_font)
+    self.original_password_input = wx.TextCtrl(
+        password_setting, wx.ID_ANY, '', size=(240, 30),
+        style=wx.TE_PASSWORD)
+    self.new_password_input = wx.TextCtrl(
+        password_setting, wx.ID_ANY, '', size=(240, 30),
+        style=wx.TE_PASSWORD)
+    self.original_password_input.SetFont(password_title_font)
+    self.new_password_input.SetFont(password_title_font)
+
+    password_title_sizer = wx.BoxSizer(wx.VERTICAL)
+    password_title_sizer.Add(original_password_title_sizer)
+    password_title_sizer.AddSpacer(10)
+    password_title_sizer.Add(new_password_title_sizer)
+
+    password_input_sizer = wx.BoxSizer(wx.VERTICAL)
+    password_input_sizer.Add(self.original_password_input)
+    password_input_sizer.AddSpacer(10)
+    password_input_sizer.Add(self.new_password_input)
+
+    password_middle_sizer.AddSpacer(20)
+    password_middle_sizer.Add(password_title_sizer)
+    password_middle_sizer.AddSpacer(20)
+    password_middle_sizer.Add(password_input_sizer)
+
+    password_setting_sizer.AddSpacer(40)
+    password_setting_sizer.Add(password_middle_sizer)
+
+    password_setting.SetSizerAndFit(password_setting_sizer)
+    self.password_setting = password_setting
+    self.settings.append(self.password_setting)
+
   def AddMenuItem(self, menu_button):
     menu_button.SetFont(self.menu_font)
     self.menu_sizer.Add(menu_button)
@@ -636,6 +696,14 @@ class AppSettingsDialog(wx.Dialog):
     self.current_menu = self.menu_language
     self.ShowCurrentSetting()
 
+  def ShowPasswordSetting(self, event):
+    self.button_save.Show()
+    self.button_map.Hide()
+    self.buttons_sizer.Layout()
+    self.current_setting = self.password_setting
+    self.current_menu = self.menu_set_password
+    self.ShowCurrentSetting()
+
   def ShowCurrentSetting(self):
     """Switch the setting page to the current chosen page."""
     for setting in self.settings:
@@ -654,6 +722,27 @@ class AppSettingsDialog(wx.Dialog):
       self.atft.ChangeLanguage(language_text)
       self.EndModal(0)
       return
+    elif self.current_setting == self.password_setting:
+      old_password = self.original_password_input.GetValue()
+      self.original_password_input.SetValue('')
+      result = self.atft.VerifyPassword(old_password)
+      old_password = None
+      if result:
+        new_password = self.new_password_input.GetValue()
+        self.new_password_input.SetValue('')
+        new_hash = self.atft.GeneratePasswordHash(new_password)
+        new_password = None
+        self.atft.PASSWORD_HASH = new_hash
+        self.atft.log.Info('Password', 'Password Changed')
+        self.atft._SendPrintEvent('Password Changed!')
+        self.EndModal(0)
+        return
+      else:
+        e = PasswordErrorException()
+        self.atft._HandleException('W', e)
+        self.atft._SendAlertEvent(self.atft.ALERT_WRONG_ORIG_PASSWORD)
+        self.original_password_input.SetValue('')
+        return
 
   def OnExit(self, event):
     """Exit handler when user clicks cancel or press 'esc'.
@@ -661,6 +750,8 @@ class AppSettingsDialog(wx.Dialog):
     Args:
       event: The triggering event.
     """
+    self.original_password_input.SetValue('')
+    self.new_password_input.SetValue('')
     self.atft.ClearATFADiscoveryCallback()
     event.Skip()
 
@@ -838,6 +929,7 @@ class Atft(wx.Frame):
           configs['PRODUCT_ATTRIBUTE_FILE_EXTENSION'])
       self.KEY_FILE_EXTENSION = str(configs['KEY_FILE_EXTENSION'])
       self.UPDATE_FILE_EXTENSION = str(configs['UPDATE_FILE_EXTENSION'])
+      self.PASSWORD_HASH = str(configs['PASSWORD_HASH'])
       if 'DEVICE_USB_LOCATIONS' in configs:
         self.device_usb_locations = configs['DEVICE_USB_LOCATIONS']
     except (KeyError, ValueError):
@@ -852,6 +944,7 @@ class Atft(wx.Frame):
     configuration if it's opened again.
     """
     self.configs['DEVICE_USB_LOCATIONS'] = self.device_usb_locations
+    self.configs['PASSWORD_HASH'] = self.PASSWORD_HASH
     self.configs['LANGUAGE'] = self.LANGUAGE
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
     with open(config_file_path, 'w') as config_file:
@@ -964,12 +1057,17 @@ class Atft(wx.Frame):
     self.DIALOG_CHOOSE_UPDATE_FILE = [
         'Choose Update Patch File', '选择升级补丁文件'][index]
     self.DIALOG_SELECT_DIRECTORY = ['Select directory', '选择文件夹'][index]
+    self.DIALOG_INPUT_PASSWORD = ['Input the password', '输入密码'][index]
+    self.DIALOG_PASSWORD = ['Password', '密码'][index]
+    self.DIALOG_ORIG_PASSWORD = ['Original Password: ', '原密码：'][index]
+    self.DIALOG_NEW_PASSWORD = ['New Password: ', '新密码：'][index]
 
     # Buttons
     self.BUTTON_ENTER_SUP_MODE = ['Enter Supervisor Mode', '进入管理模式'][index]
     self.BUTTON_LEAVE_SUP_MODE = ['Leave Supervisor Mode', '离开管理模式'][index]
     self.BUTTON_MAP_USB_LOCATION = ['Map USB Locations', '关联USB位置'][index]
     self.BUTTON_LANGUAGE_PREFERENCE = ['Language Preference', '语言偏好'][index]
+    self.BUTTON_SET_PASSWORD = ['Set Password', '设置密码'][index]
     self.BUTTON_REMAP = ['Remap', '重新关联'][index]
     self.BUTTON_MAP = ['Map', '关联'][index]
     self.BUTTON_CANCEL = ['Cancel', '取消'][index]
@@ -1123,6 +1221,12 @@ class Atft(wx.Frame):
         'The language setting would take effect after you restart the '
         'application.',
         '语言设置将在下次重启程序后生效。']
+    self.ALERT_WRONG_PASSWORD = [
+        'Wrong Password!!!',
+        '密码错误!!!'][index]
+    self.ALERT_WRONG_ORIG_PASSWORD = [
+        'Wrong Original Password!!!',
+        '原密码错误!!!'][index]
 
     self.STATUS_MAPPED = ['Mapped', '已关联位置'][index]
     self.STATUS_NOT_MAPPED = ['Not mapped', '未关联位置'][index]
@@ -1204,6 +1308,10 @@ class Atft(wx.Frame):
         self.DIALOG_ALERT_TEXT,
         self.DIALOG_ALERT_TITLE,
         style=wx.OK | wx.ICON_EXCLAMATION | wx.CENTRE)
+
+    # Password Dialog
+    self.password_dialog = wx.PasswordEntryDialog(
+        self, self.DIALOG_INPUT_PASSWORD, self.DIALOG_PASSWORD)
 
     self._CreateBindEvents()
 
@@ -1852,14 +1960,27 @@ class Atft(wx.Frame):
 
   def OnEnterSupMode(self):
     """Enter supervisor mode, ask for credential."""
-    message = 'Enter supervisor mode'
-    self.PrintToCommandWindow(message)
-    self.log.Info('Supmode', message)
-    self.sup_mode = True
-    self.button_supervisor_toggle.SetLabel(self.BUTTON_LEAVE_SUP_MODE)
-    self.SetMenuBar(self.menubar)
-    self.cmd_output_wrap.Show()
-    self.OnLeaveAutoProv()
+    self.password_dialog.CenterOnParent()
+    if self.password_dialog.ShowModal() != wx.ID_OK:
+      return
+    password = self.password_dialog.GetValue()
+    self.password_dialog.SetValue('')
+    result = self.VerifyPassword(password)
+    password = None
+    if result:
+      message = 'Enter supervisor mode'
+      self.PrintToCommandWindow(message)
+      self.log.Info('Supmode', message)
+      self.sup_mode = True
+      self.button_supervisor_toggle.SetLabel(self.BUTTON_LEAVE_SUP_MODE)
+      self.SetMenuBar(self.menubar)
+      self.cmd_output_wrap.Show()
+      self.OnLeaveAutoProv()
+    else:
+      e = PasswordErrorException()
+      # Log the wrong password event.
+      self._HandleException('W', e)
+      self._SendAlertEvent(self.ALERT_WRONG_PASSWORD)
 
   def OnManualProvision(self, event):
     """Manual provision key asynchronously.
@@ -3413,6 +3534,29 @@ class Atft(wx.Frame):
             self.ALERT_LANGUAGE_RESTART[self.GetLanguageIndex()])
         break
 
+  def VerifyPassword(self, password):
+    """Use pbkdf2_sha256 to verify password against the stored hash.
+
+    Args:
+      password: The password to be verified.
+    Returns:
+      True: if password match.
+      False: if password does not match.
+    """
+    try:
+      return pbkdf2_sha256.verify(password, self.PASSWORD_HASH)
+    except:
+      return False
+
+  def GeneratePasswordHash(self, password):
+    """Use pbkdf2_sha256 to generate password hash.
+
+    Args:
+      password: The password to be verified.
+    Returns:
+      password hash
+    """
+    return pbkdf2_sha256.hash(password)
 
 def main():
   app = wx.App()
