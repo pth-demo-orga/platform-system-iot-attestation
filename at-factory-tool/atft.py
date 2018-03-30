@@ -29,6 +29,7 @@ import threading
 
 from atftman import AtftManager
 from atftman import ProvisionStatus
+from atftman import RebootCallback
 
 from fastboot_exceptions import DeviceCreationException
 from fastboot_exceptions import DeviceNotFoundException
@@ -325,12 +326,21 @@ class ChangeThresholdDialog(wx.Dialog):
     self.SetSizer(panel_sizer)
     self.SetSize(300, 250)
 
+    self._CreateTitle(panel_sizer)
+    self._CreateFirstWarningInput(panel_sizer)
+    panel_sizer.AddSpacer(10)
+    self._CreateSecondWarningInput(panel_sizer)
+    panel_sizer.AddSpacer(40)
+    self._CreateButtons(panel_sizer)
+
+  def _CreateTitle(self, panel_sizer):
     dialog_title = wx.StaticText(
         self, wx.ID_ANY, self.atft.DIALOG_CHANGE_THRESHOLD_TEXT)
     title_font = wx.Font(14, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
     dialog_title.SetFont(title_font)
     panel_sizer.Add(dialog_title, 0, wx.ALL, 20)
 
+  def _CreateFirstWarningInput(self, panel_sizer):
     line_sizer = wx.BoxSizer(wx.HORIZONTAL)
     first_warning_hint = wx.StaticText(
         self, wx.ID_ANY, self.atft.TITLE_FIRST_WARNING)
@@ -342,8 +352,7 @@ class ChangeThresholdDialog(wx.Dialog):
     first_warning_hint.SetFont(font)
     self.first_warning_input.SetFont(font)
 
-    panel_sizer.AddSpacer(10)
-
+  def _CreateSecondWarningInput(self, panel_sizer):
     line_sizer = wx.BoxSizer(wx.HORIZONTAL)
     second_warning_hint = wx.StaticText(
         self, wx.ID_ANY, self.atft.TITLE_SECOND_WARNING)
@@ -356,8 +365,7 @@ class ChangeThresholdDialog(wx.Dialog):
     second_warning_hint.SetFont(font)
     self.second_warning_input.SetFont(font)
 
-    panel_sizer.AddSpacer(40)
-
+  def _CreateButtons(self, panel_sizer):
     button_sizer = wx.BoxSizer(wx.HORIZONTAL)
     button_font = wx.Font(12, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
     button_cancel = wx.Button(
@@ -369,7 +377,6 @@ class ChangeThresholdDialog(wx.Dialog):
     button_sizer.Add(button_cancel, 0)
     button_sizer.Add(button_save, 0, wx.LEFT, 5)
     panel_sizer.Add(button_sizer, 0, wx.ALIGN_CENTER)
-
     button_save.Bind(wx.EVT_BUTTON, self.OnSave)
 
   def ShowModal(self):
@@ -429,6 +436,177 @@ class ChangeThresholdDialog(wx.Dialog):
       # If any field is invalid, let user input again.
       return
     self.EndModal(0)
+
+
+class AppSettingsDialog(wx.Dialog):
+  """The dialog class to ask user to change application settings.
+
+  Now support Mapping USB Location to UI slot, Setting language and Setting
+  password for supervisor mode.
+  """
+
+  def __init__(self, atft):
+    """Initiate the dialog using the atft class instance.
+
+    Args:
+      atft: The atft class instance.
+    """
+    self.atft = atft
+    self.settings = []
+    self.menu_items = []
+    self.current_setting = None
+
+  def CreateDialog(self, *args, **kwargs):
+    """The actual initializer to create the dialog.
+
+    This function creates UI elements within the dialog and only need to be
+    called once. This function should be called with the same argument for
+    wx.Dialog class and should be called as part of the initialization after
+    using __init__.
+    """
+    super(AppSettingsDialog, self).__init__(*args, **kwargs)
+    self.SetForegroundColour(self.atft.COLOR_BLACK)
+    self.SetBackgroundColour(self.atft.COLOR_WHITE)
+    self.SetSize(850, 650)
+    panel_sizer = wx.BoxSizer(wx.VERTICAL)
+    self.SetSizer(panel_sizer)
+
+    self.menu_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    self.menu_font = wx.Font(10, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    self.menu_font_bold = wx.Font(
+        10, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_BOLD)
+
+    panel_sizer.Add(self.menu_sizer, 0, wx.ALL, 15)
+    panel_sizer.AddSpacer(10)
+    self.settings_sizer = wx.BoxSizer(wx.VERTICAL)
+
+    self._CreateUSBMappingPanel()
+
+    panel_sizer.Add(self.settings_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 10)
+    self.panel_sizer = panel_sizer
+
+    self._CreateButtons()
+    self.UpdateMappingStatus()
+
+    # By default, we show map usb location setting.
+    self.ShowUSBMappingSetting(None)
+
+  def _CreateButtons(self):
+    buttons_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    button_cancel = wx.Button(
+        self, label=self.atft.BUTTON_CANCEL, size=(130, 30), id=wx.ID_CANCEL)
+    button_map = wx.Button(
+        self, label=self.atft.BUTTON_MAP, size=(130, 30), id=wx.ID_ANY)
+    button_font = wx.Font(12, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    button_save = wx.Button(
+        self, label=self.atft.BUTTON_SAVE, size=(130, 30), id=wx.ID_ANY)
+    button_map.SetFont(button_font)
+    button_cancel.SetFont(button_font)
+    button_save.SetFont(button_font)
+
+    buttons_sizer.Add(button_cancel)
+    buttons_sizer.Add(button_map, 0, wx.LEFT, 10)
+    buttons_sizer.Add(button_save, 0, wx.LEFT, 10)
+
+    self.button_cancel = button_cancel
+    self.button_map = button_map
+    self.button_save = button_save
+    self.buttons_sizer = buttons_sizer
+    self.panel_sizer.AddSpacer(20)
+    self.panel_sizer.Add(buttons_sizer, 0, wx.ALIGN_RIGHT | wx.RIGHT, 10)
+
+    # Bind handlers
+    self.button_map.Bind(wx.EVT_BUTTON, self.atft.MapUSBLocationToSlot)
+    self.button_cancel.Bind(wx.EVT_BUTTON, self.OnExit)
+
+  def _CreateUSBMappingPanel(self):
+    menu_map_usb = wx.Button(
+        self, label=self.atft.BUTTON_MAP_USB_LOCATION, style=wx.BORDER_NONE)
+    menu_map_usb.Bind(wx.EVT_BUTTON, self.ShowUSBMappingSetting)
+    menu_map_usb.SetFont(self.menu_font)
+    self.menu_map_usb = menu_map_usb
+    self.AddMenuItem(self.menu_map_usb)
+    usb_mapping_panel = wx.Window(self, style=wx.BORDER_SUNKEN)
+    self.settings_sizer.Add(usb_mapping_panel, 0, wx.EXPAND)
+    usb_mapping_panel.SetBackgroundColour(self.atft.COLOR_WHITE)
+    usb_mapping_panel_sizer = wx.BoxSizer(wx.VERTICAL)
+    usb_mapping_panel_sizer.SetMinSize((0, 480))
+    usb_mapping_title = wx.StaticText(
+        usb_mapping_panel, wx.ID_ANY, self.atft.TITLE_MAP_USB)
+    usb_mapping_panel_sizer.AddSpacer(10)
+    usb_mapping_panel_sizer.Add(usb_mapping_title, 0, wx.EXPAND | wx.ALL, 10)
+    usb_mapping_panel_sizer.AddSpacer(10)
+    usb_mapping_title_font = wx.Font(
+        12, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    usb_mapping_title.SetFont(usb_mapping_title_font)
+    self.atft.dev_mapping_components = self.atft.CreateTargetDeviceList(
+        usb_mapping_panel, usb_mapping_panel_sizer, True)
+    i = 0
+    for dev_component in self.atft.dev_mapping_components:
+      handler = lambda event, index=i : self.atft._MapUSBToSlotHandler(
+          event, index)
+      # Bind the select handler
+      self.atft._BindEventRecursive(wx.EVT_LEFT_DOWN, dev_component.panel, handler)
+      i += 1
+
+    usb_mapping_panel.SetSizerAndFit(usb_mapping_panel_sizer)
+    self.usb_mapping_panel = usb_mapping_panel
+    self.settings.append(self.usb_mapping_panel)
+
+  def AddMenuItem(self, menu_button):
+    menu_button.SetFont(self.menu_font)
+    self.menu_sizer.Add(menu_button)
+    self.menu_sizer.AddSpacer(10)
+    self.menu_items.append(menu_button)
+
+  def UpdateMappingStatus(self):
+    """Refresh the mapping status (mapped/not mapped) for each device slot.
+
+    In order for the status to be aligned correctly, this function needs to be
+    called each time the status text changes.
+    """
+    i = 0
+    for dev_component in self.atft.dev_mapping_components:
+      if self.atft.device_usb_locations[i]:
+        dev_component.status.SetLabel(self.atft.STATUS_MAPPED)
+      else:
+        dev_component.status.SetLabel(self.atft.STATUS_NOT_MAPPED)
+      dev_component.status.GetParent().Layout()
+      dev_component.status_wrapper.Layout()
+      i += 1
+
+  def ShowUSBMappingSetting(self, event):
+    """Show the sub panel for mapping USB location.
+
+    Args:
+      event: The triggering event.
+    """
+    self.button_save.Hide()
+    self.button_map.Show()
+    self.buttons_sizer.Layout()
+    self.current_setting = self.usb_mapping_panel
+    self.current_menu = self.menu_map_usb
+    self.ShowCurrentSetting()
+
+  def ShowCurrentSetting(self):
+    """Switch the setting page to the current chosen page."""
+    for setting in self.settings:
+      setting.Hide()
+    for menu_item in self.menu_items:
+      menu_item.SetFont(self.menu_font)
+    self.current_setting.Show()
+    self.current_menu.SetFont(self.menu_font_bold)
+    self.settings_sizer.Layout()
+    self.panel_sizer.Layout()
+
+  def OnExit(self, event):
+    """Exit handler when user clicks cancel or press 'esc'.
+
+    Args:
+      event: The triggering event.
+    """
+    self.atft.ClearATFADiscoveryCallback()
+    event.Skip()
 
 
 class Atft(wx.Frame):
@@ -572,9 +750,9 @@ class Atft(wx.Frame):
 
     # The list to store the device location for each target device slot. If the
     # slot is not mapped, it will be None.
-    self.device_locations = []
+    self.device_usb_locations = []
     for i in range(0, self.TARGET_DEV_SIZE):
-      self.device_locations.append(None)
+      self.device_usb_locations.append(None)
 
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
     if not os.path.exists(config_file_path):
@@ -604,8 +782,8 @@ class Atft(wx.Frame):
           configs['PRODUCT_ATTRIBUTE_FILE_EXTENSION'])
       self.KEY_FILE_EXTENSION = str(configs['KEY_FILE_EXTENSION'])
       self.UPDATE_FILE_EXTENSION = str(configs['UPDATE_FILE_EXTENSION'])
-      if 'DEVICE_LOCATIONS' in configs:
-        self.device_locations = configs['DEVICE_LOCATIONS']
+      if 'DEVICE_USB_LOCATIONS' in configs:
+        self.device_usb_locations = configs['DEVICE_USB_LOCATIONS']
     except (KeyError, ValueError):
       return None
 
@@ -617,7 +795,8 @@ class Atft(wx.Frame):
     By storing the configuration back, the program would remember the
     configuration if it's opened again.
     """
-    self.configs['DEVICE_LOCATIONS'] = self.device_locations
+    self.configs['DEVICE_USB_LOCATIONS'] = self.device_usb_locations
+    self.configs['LANGUAGE'] = self.LANGUAGE
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
     with open(config_file_path, 'w') as config_file:
       config_file.write(json.dumps(self.configs, sort_keys=True, indent=4))
@@ -697,6 +876,12 @@ class Atft(wx.Frame):
     self.TITLE_KEYS_LEFT = ['Attestation Keys Left:', '剩余密钥:'][index]
     self.TITLE_TARGET_DEV = ['Target Devices', '目标设备'][index]
     self.TITLE_COMMAND_OUTPUT = ['Command Output', '控制台输出'][index]
+    self.TITLE_MAP_USB = [
+        'Insert one ATFA device into the USB port you want to map, then select '
+        'one of the six corresponding\nUI slots. This UI slot would be '
+        'mapped to the USB port with the ATFA plugged in.',
+        '将一个ATFA设备插入到你想关联的USB接口，然后选择界面上六个目标设备位置中的一个。\n'
+        '这个目标设备位置将被关联到你插入ATFA设备的USB接口'][index]
     self.TITLE_FIRST_WARNING = ['1st\twarning: ', '警告一：'][index]
     self.TITLE_SECOND_WARNING = ['2nd\twarning: ', '警告二：'][index]
 
@@ -728,6 +913,9 @@ class Atft(wx.Frame):
     # Buttons
     self.BUTTON_ENTER_SUP_MODE = ['Enter Supervisor Mode', '进入管理模式'][index]
     self.BUTTON_LEAVE_SUP_MODE = ['Leave Supervisor Mode', '离开管理模式'][index]
+    self.BUTTON_MAP_USB_LOCATION = ['Map USB Locations', '关联USB位置'][index]
+    self.BUTTON_REMAP = ['Remap', '重新关联'][index]
+    self.BUTTON_MAP = ['Map', '关联'][index]
     self.BUTTON_CANCEL = ['Cancel', '取消'][index]
     self.BUTTON_SAVE = ['Save', '保存'][index]
 
@@ -807,10 +995,34 @@ class Atft(wx.Frame):
         'Cannot provision device that is not ready for provisioning or '
         'already provisioned!',
         '无法传输密钥给一个不在正确状态或者已经拥有密钥的设备！'][index]
+    self.ALERT_NO_MAP_DEVICE_CHOSEN = [
+        'No device location chosen for mapping!',
+        ' 未选择要关联的设备位置'][index]
+    self.ALERT_MAP_DEVICE_TIMEOUT = [
+        'Mapping Failure!\nNo ATFA device detected at any USB Location!',
+        '关联失败！\n没有在任何USB口检测到ATFA设备！'][index]
     self.ALERT_INCOMPATIBLE_ATFA = [
         'Detected an ATFA device having incompatible version with this tool, '
         'please upgrade your ATFA device to the latest version!',
         '检测到一个与这个软件不兼容的ATFA设备，请升级你的ATFA设备！'][index]
+    self.ALERT_REMAP_LOCATION_SLOT = [
+        lambda location, slot :
+            ('The USB location ' + location.encode('utf-8') +
+             ' was aleady mapped to slot ' + slot.encode('utf-8') +
+             ' before, do you want to overwrite?'),
+        lambda location, slot :
+            ('USB位置' + location.encode('utf-8') + '已经被关联到设备位置' +
+             slot.encode('utf-8') + ', 是否覆盖?')
+        ][index]
+    self.ALERT_REMAP_SLOT_LOCATION = [
+        lambda slot, location :
+            'The slot ' + slot + ' was aleady mapped to '
+            'USB Location ' + location.encode('utf-8') + ' before, '
+            'do you want to overwrite?',
+        lambda slot, location :
+            ('设备位置' + slot.encode('utf-8') +
+             '已经被关联到USB位置' + location.encode('utf-8') + ', 是否覆盖?')
+        ][index]
     self.ALERT_ADD_MORE_KEY = [
         lambda keys_left:
             'Warning - add more keys\n'
@@ -849,6 +1061,10 @@ class Atft(wx.Frame):
         'Are you sure you want to purge all the keys for this product?\n'
         'The keys would be purged permanently!!!',
         '你确定要清楚密钥吗？\n设备中的密钥将永久丢失！！！'][index]
+
+    self.STATUS_MAPPED = ['Mapped', '已关联位置'][index]
+    self.STATUS_NOT_MAPPED = ['Not mapped', '未关联位置'][index]
+    self.STATUS_MAPPING = ['Mapping', '正在关联'][index]
 
   def InitializeUI(self):
     """Initialize the application UI."""
@@ -900,6 +1116,11 @@ class Atft(wx.Frame):
     self.SetTitle(self.TITLE)
     self.panel.SetSizerAndFit(self.main_box)
     self.Show(True)
+
+    # App Settings Dialog
+    self.app_settings_dialog = AppSettingsDialog(self)
+    self.app_settings_dialog.CreateDialog(
+        self, wx.ID_ANY, self.MENU_APP_SETTINGS)
 
     # Change Key Threshold Dialog
     self.change_threshold_dialog = ChangeThresholdDialog(self)
@@ -1106,7 +1327,7 @@ class Atft(wx.Frame):
     target_devs_panel_sizer.Add(
         self.target_devs_title_sizer, 0, wx.TOP | wx.BOTTOM, 10)
 
-    self.target_devs_components = self.CreateTargetDeviceList(
+    self.target_dev_components = self.CreateTargetDeviceList(
         target_devs_panel, target_devs_panel_sizer)
 
     target_devs_panel.SetSizerAndFit(target_devs_panel_sizer)
@@ -1232,26 +1453,26 @@ class Atft(wx.Frame):
       size_y += self.statusbar.GetSize()[1]
     return (size_x, size_y)
 
-  def CreateTargetDeviceList(self, parent, parent_sizer, map_location=False):
+  def CreateTargetDeviceList(self, parent, parent_sizer, map_usb=False):
     """Create the grid style panel to display target device information.
 
     Args:
       parent: The parent window.
       parent_sizer: The parent sizer.
-      map_location: Whether the target list is for USB location mapping.
+      map_usb: Whether the target list is for USB location mapping.
     Returns:
       A list of DevComponent object that contains necessary information and UI
         element about each target device.
     """
     # target device output components
-    target_devs_components = []
+    target_dev_components = []
 
     # The scale of the display size. We need a smaller version of the target
     # device list for the settings page, so we can use this scale factor to
     # scale the panel's size.
     scale = 1
 
-    if map_location:
+    if map_usb:
       scale = 0.9
 
     # Device Output Window
@@ -1347,7 +1568,7 @@ class Atft(wx.Frame):
       target_devs_output_status_info = wx.StaticText(
           target_devs_output_status, wx.ID_ANY, device_status_string)
       font_size = 18
-      if map_location:
+      if map_usb:
         font_size = 20
       status_font = wx.Font(
           font_size, wx.FONTFAMILY_MODERN, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
@@ -1375,9 +1596,9 @@ class Atft(wx.Frame):
 
       devices_list.Add(
           target_devs_output_panel_sizer_wrap, 0, wx.LEFT | wx.RIGHT, 10)
-      target_devs_components.append(dev_component)
+      target_dev_components.append(dev_component)
 
-    return target_devs_components
+    return target_dev_components
 
   def PauseRefresh(self):
     """Pause the refresh for device list during fastboot operations.
@@ -1705,7 +1926,8 @@ class Atft(wx.Frame):
     wx.QueueEvent(self, event)
 
   def ChangeSettings(self, event):
-    pass
+    self.app_settings_dialog.CenterOnParent()
+    self.app_settings_dialog.ShowModal()
 
   def ProcessProductAttributesFile(self, pathname):
     """Process the selected product attributes file.
@@ -1976,6 +2198,13 @@ class Atft(wx.Frame):
     # Event for save a file.
     self.save_file_event = wx.NewEventType()
     self.save_file_event_bind = wx.PyEventBinder(self.save_file_event)
+    # Event for update the mapping status for mapping USB location
+    self.update_mapping_status_event = wx.NewEventType()
+    self.update_mapping_status_bind = wx.PyEventBinder(
+        self.update_mapping_status_event)
+
+    self.map_usb_success_event = wx.NewEventType()
+    self.map_usb_success_bind = wx.PyEventBinder(self.map_usb_success_event)
 
     self.Bind(self.refresh_event_bind, self.OnListDevices)
     self.Bind(self.dev_listed_event_bind, self._DeviceListedEventHandler)
@@ -1985,6 +2214,15 @@ class Atft(wx.Frame):
     self.Bind(self.low_key_alert_event_bind, self._LowKeyAlertEventHandler)
     self.Bind(self.select_file_event_bind, self._SelectFileEventHandler)
     self.Bind(self.save_file_event_bind, self._SaveFileEventHandler)
+    self.Bind(self.update_mapping_status_bind, self._UpdateMappingStatusHandler)
+    self.Bind(self.map_usb_success_bind, self.MapUSBToSlotSuccessMainThread)
+
+    i = 0
+    for dev_component in self.target_dev_components:
+      self._BindEventRecursive(
+          wx.EVT_LEFT_DOWN, dev_component.panel,
+          lambda event, index=i : self._DeviceSelectHandler(event, index))
+      i += 1
 
     # Bind the close event
     self.Bind(wx.EVT_CLOSE, self.OnClose)
@@ -1995,7 +2233,7 @@ class Atft(wx.Frame):
       event: The triggering event.
       index: The index for the target device.
     """
-    dev_component = self.target_devs_components[index]
+    dev_component = self.target_dev_components[index]
     title_background = dev_component.title_background
     if not dev_component.selected:
       title_background.SetBackgroundColour(self.COLOR_PICK_BLUE)
@@ -2004,6 +2242,51 @@ class Atft(wx.Frame):
     title_background.Refresh()
     dev_component.selected = not dev_component.selected
     event.Skip()
+
+  def _MapUSBToSlotHandler(self, event, index):
+    """The handler to map a target device's USB location to a UI slot.
+
+    This should be a single select since user can only select one device
+    location to be mapped.
+
+    Args:
+      event: The triggering event.
+      index: The index for the target device.
+    """
+    i = 0
+    for dev_component in self.dev_mapping_components:
+      title_background = dev_component.title_background
+      if i == index:
+        title_background.SetBackgroundColour(self.COLOR_PICK_BLUE)
+        if self.device_usb_locations[i]:
+          # If already selected, change the button to 'remap'
+          self.app_settings_dialog.button_map.SetLabel(self.BUTTON_REMAP)
+        else:
+          self.app_settings_dialog.button_map.SetLabel(self.BUTTON_MAP)
+        self.app_settings_dialog.button_map.GetParent().Layout()
+        dev_component.selected = True
+      else:
+        title_background.SetBackgroundColour(self.COLOR_WHITE)
+        dev_component.selected = False
+      title_background.Refresh()
+      i += 1
+
+    event.Skip()
+
+  def _BindEventRecursive(self, event, widget, handler):
+    """Bind a event to all the children under a widget recursively.
+
+    Because some event such as mouse down would not propagate to parent window,
+    we need to bind the event handler to all the children of the target widget.
+
+    Args:
+      event: The event to bind.
+      widget: The current widget to bind.
+      handler: The event handler.
+    """
+    widget.Bind(event, handler)
+    for child in widget.GetChildren():
+      self._BindEventRecursive(event, child, handler)
 
   def _SendAlertEvent(self, msg):
     """Send an event to generate an alert box.
@@ -2076,6 +2359,11 @@ class Atft(wx.Frame):
     """
     wx.QueueEvent(self, Event(self.low_key_alert_event, value=keys_left))
 
+  def SendUpdateMappingEvent(self):
+    """Send an event to indicate the mapping status need to be updated.
+    """
+    wx.QueueEvent(self, Event(self.update_mapping_status_event))
+
   def _AlertEventHandler(self, event):
     """The handler to handle the event to display an alert box.
 
@@ -2118,6 +2406,7 @@ class Atft(wx.Frame):
       self._HandleAutoProv()
 
     self._PrintAtfaDevice()
+    self._HandleATFADiscovery()
     if self.last_target_list == self.atft_manager.target_devs:
       # Nothing changes, no need to refresh
       return
@@ -2144,9 +2433,9 @@ class Atft(wx.Frame):
       serial_text = ''
       status = None
       serial_number = None
-      if self.device_locations[i]:
+      if self.device_usb_locations[i]:
         for target_dev in target_devs:
-          if target_dev.location == self.device_locations[i]:
+          if target_dev.location == self.device_usb_locations[i]:
             serial_number = target_dev.serial_number
             serial_text = (
                 self.FIELD_SERIAL_NUMBER + ': ' + str(serial_number))
@@ -2163,7 +2452,7 @@ class Atft(wx.Frame):
       serial_text: The serial number text to be displayed.
       status: The provision status.
     """
-    dev_component = self.target_devs_components[i]
+    dev_component = self.target_dev_components[i]
     dev_component.serial_text.SetLabel(serial_text)
     dev_component.serial_number = serial_number
     color = self._GetStatusColor(status)
@@ -2236,6 +2525,15 @@ class Atft(wx.Frame):
     self.low_key_dialog.SetMessage(self.ALERT_ADD_MORE_KEY(keys_left))
     self.low_key_dialog.CenterOnParent()
     self.low_key_dialog.ShowModal()
+
+  def _UpdateMappingStatusHandler(self, event):
+    """Update the device mapping status in the Mapping USB Location page.
+
+    Args:
+      event: The triggering event.
+    """
+    if self.app_settings_dialog:
+      self.app_settings_dialog.UpdateMappingStatus()
 
   def _CreateThread(self, target, *args):
     """Create and start a thread.
@@ -2372,6 +2670,7 @@ class Atft(wx.Frame):
       return
     except FastbootFailure as e:
       self._HandleException('E', e, operation)
+      return
     finally:
       self.ResumeRefresh()
 
@@ -2839,11 +3138,145 @@ class Atft(wx.Frame):
     """
     selected_serials = []
     i = 0
-    for dev_component in self.target_devs_components:
-      if self.device_locations[i] and dev_component.selected:
+    for dev_component in self.target_dev_components:
+      if self.device_usb_locations[i] and dev_component.selected:
         selected_serials.append(dev_component.serial_number)
       i += 1
     return selected_serials
+
+  def MapUSBLocationToSlot(self, event):
+    """The handler to map a USB location to an UI slot in the tool.
+
+    This handler would be triggered if the 'map' button on the USB Location
+    Mapping interface is clicked. We need to wait for an ATFA device to appear
+    at a location and then map this location to a target device slot on the UI.
+
+    Args:
+      event: The triggering event.
+    """
+    selected = [
+        dev_component for dev_component in self.dev_mapping_components if
+            dev_component.selected]
+
+    if not selected:
+      self._SendAlertEvent(self.ALERT_NO_MAP_DEVICE_CHOSEN)
+      return
+
+    self.ClearATFADiscoveryCallback()
+
+    component = selected[0]
+
+    if self.device_usb_locations[component.index]:
+      # If this slot was already mapped, warn the user.
+      warning_message = self.ALERT_REMAP_SLOT_LOCATION(
+          str(component.index + 1), self.device_usb_locations[component.index])
+      if not self._ShowWarning(warning_message):
+        return
+
+    # Need to call parent.layout to refresh
+    component.status.SetLabel(self.STATUS_MAPPING)
+    component.status.GetParent().Layout()
+    component.status_wrapper.Layout()
+
+    success_callback = (
+        lambda location, component=component :
+        self.MapUSBToSlotSuccess(location, component))
+    fail_callback = (
+        lambda component=component : self.MapUSBToSlotTimeout(component))
+    # Wait for an ATFA device to show up at the selected slot.
+    self.wait_atfa_callback = RebootCallback(
+        self.ATFA_REBOOT_TIMEOUT, success_callback, fail_callback)
+
+  def ClearATFADiscoveryCallback(self):
+    """Cancel a currently waiting for ATFA device and cancel the callback.
+    """
+    if not self.wait_atfa_callback:
+      return
+    lock = self.wait_atfa_callback.lock
+    # If there's no callback current happening on this ATFA device, Release the
+    # lock and the structure allocated to it.
+    if lock and lock.acquire(False):
+      # Remember to release the lock when the success callback is finished.
+      self.wait_atfa_callback.Release()
+
+    # If some of the mapping status is 'mapping', change them to the correct
+    # status.
+    self.app_settings_dialog.UpdateMappingStatus()
+
+  def _HandleATFADiscovery(self):
+    """This function handles ATFA device discovery.
+
+    This function would call the success callback if an atfa device is found.
+    """
+    if not self.atft_manager.atfa_dev or not self.wait_atfa_callback:
+      return
+    # If we are waiting for an ATFA and we find one.
+    lock = self.wait_atfa_callback.lock
+    location = self.atft_manager.atfa_dev.location
+    if lock and lock.acquire(False):
+      self.wait_atfa_callback.success(location)
+
+  class MapUSBToSlotArgs(object):
+
+    def __init__(self, location, index):
+      self.location = location
+      self.index = index
+
+  def MapUSBToSlotSuccess(self, location, component):
+    """The success callback for location mapping.
+
+    Note that we need to have UI operations and this callback would be called
+    within a different thread, thus we need to use event to let the
+    MapUSBToSlotSuccessMainThread to actually handles the callback.
+
+    Args:
+      location: The USB location to be mapped.
+      component: The UI component to be mapped to the location.
+    """
+    evt = Event(
+        self.map_usb_success_event, wx.ID_ANY,
+        self.MapUSBToSlotArgs(location, component.index))
+    wx.QueueEvent(self, evt)
+
+  def MapUSBToSlotSuccessMainThread(self, event):
+    """The success callback if we find an atfa device.
+
+    We map the selected slot to the location where we find the device. We also
+    release the resources after the callback.
+    """
+    location = event.GetValue().location
+    index = event.GetValue().index
+    # Check if the location is already mounted to a slot, if so gives a warning
+    # since this mapping would overwrite previous configuration.
+    for i in range(0, self.TARGET_DEV_SIZE):
+      if (self.device_usb_locations[i] and
+          self.device_usb_locations[i] == location and i != index):
+        warning_text = self.ALERT_REMAP_LOCATION_SLOT(
+            self.device_usb_locations[i], str(i + 1))
+        if not self._ShowWarning(warning_text):
+          self.SendUpdateMappingEvent()
+          self.wait_atfa_callback.Release()
+          self.wait_atfa_callback = None
+          return
+        else:
+          self.device_usb_locations[i] = None
+
+    self.device_usb_locations[index] = location
+    self.SendUpdateMappingEvent()
+    # Finished handling the success callback, release the callback lock.
+    self.wait_atfa_callback.Release()
+    self.wait_atfa_callback = None
+
+  def MapUSBToSlotTimeout(self, component):
+    """The callback when an ATFA device is not found before timeout.
+
+    This means the mapping operation times out.
+    """
+    self._SendAlertEvent(self.ALERT_MAP_DEVICE_TIMEOUT)
+    self.SendUpdateMappingEvent()
+    self.wait_atfa_callback.Release()
+    self.wait_atfa_callback = None
+
 
 
 def main():
