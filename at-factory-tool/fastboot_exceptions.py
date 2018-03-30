@@ -87,3 +87,10 @@ class OsVersionNotCompatibleException(AtftBaseException):
 
 class NoKeysException(AtftBaseException):
   pass
+
+
+class PasswordErrorException(AtftBaseException):
+
+  def __init__(self):
+    AtftBaseException.__init__(self)
+    self.msg = 'Wrong Password!!!'
