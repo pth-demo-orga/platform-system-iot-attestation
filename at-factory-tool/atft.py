@@ -491,6 +491,7 @@ class Atft(wx.Frame):
     self.MENU_ATFA_STATUS = ['ATFA Status', '查询余量'][index]
     self.MENU_ATFA_UPDATE = ['Update', '升级'][index]
     self.MENU_KEY_THRESHOLD = ['Key Warning Threshold', '密钥警告阈值'][index]
+    self.MENU_REG_FILE = ['Download Reg File', '下载注册文件'][index]
     self.MENU_REBOOT = ['Reboot', '重启'][index]
     self.MENU_SHUTDOWN = ['Shutdown', '关闭'][index]
 
@@ -532,6 +533,7 @@ class Atft(wx.Frame):
         'Choose Product Attributes File', '选择产品文件'][index]
     self.DIALOG_CHOOSE_UPDATE_FILE = [
         'Choose Update Patch File', '选择升级补丁文件'][index]
+    self.DIALOG_SELECT_DIRECTORY = ['Select directory', '选择文件夹'][index]
 
     # Buttons
     self.BUTTON_TARGET_DEV_TOGGLE_SORT = ['target_device_sort_button',
@@ -577,6 +579,12 @@ class Atft(wx.Frame):
     self.ALERT_CANNOT_OPEN_FILE = [
         'Can not open file: ',
         '无法打开文件: '][index]
+    self.ALERT_CANNOT_SAVE_FILE = [
+        'Cannot save file at file path: ',
+        '无法保存文件路径: '][index]
+    self.ALERT_FILE_EXISTS = [
+        ' already exists, do you want to overwrite it?',
+        ' 已经存在，是否覆盖？'][index]
     self.ALERT_PRODUCT_FILE_FORMAT_WRONG = [
         'The format for the product attributes file is not correct!',
         '产品文件格式不正确！'][index]
@@ -611,6 +619,18 @@ class Atft(wx.Frame):
     self.ALERT_PURGE_KEY_FAILURE = [
         'Purge key failed, Error: ',
         '清除密钥失败！错误信息：'][index]
+    self.ALERT_CANNOT_GET_REG = [
+        'Cannot get registration file! Error: ',
+        '无法获得注册文件！错误：'][index]
+    self.ALERT_REG_DOWNLOADED = [
+        'Registration file downloaded at: ',
+        '注册文件下载完成，位置：'][index]
+    self.ALERT_CANNOT_GET_AUDIT = [
+        'Cannot get audit file! Error: ',
+        '无法获得审计文件！错误：'][index]
+    self.ALERT_AUDIT_DOWNLOADED = [
+        'Audit file downloaded at: ',
+        '审计文件下载完成，位置：'][index]
     self.ALERT_CONFIRM_PURGE_KEY = [
         'Are you sure you want to purge all the keys for this product?\n'
         'The keys would be purged permanently!!!',
@@ -693,17 +713,18 @@ class Atft(wx.Frame):
     self.Bind(wx.EVT_MENU, self.OnManualProvision, menu_manual_prov)
 
     # Audit Menu Options
-    # TODO(shanyu): audit-related
     menu_storage = self.audit_menu.Append(wx.ID_ANY, self.MENU_STORAGE)
     self.Bind(wx.EVT_MENU, self.OnStorageMode, menu_storage)
+    menu_download_audit = self.audit_menu.Append(
+        wx.ID_ANY, self.MENU_DOWNLOAD_AUDIT)
+    self.Bind(wx.EVT_MENU, self.OnGetAuditFile, menu_download_audit)
 
     # ATFA Menu Options
     menu_atfa_status = self.atfa_menu.Append(wx.ID_ANY, self.MENU_ATFA_STATUS)
     self.Bind(wx.EVT_MENU, self.OnCheckATFAStatus, menu_atfa_status)
 
-    menu_key_threshold = self.atfa_menu.Append(
-        wx.ID_ANY, self.MENU_KEY_THRESHOLD)
-    self.Bind(wx.EVT_MENU, self.OnChangeKeyThreshold, menu_key_threshold)
+    menu_reg_file = self.atfa_menu.Append(wx.ID_ANY, self.MENU_REG_FILE)
+    self.Bind(wx.EVT_MENU, self.OnGetRegFile, menu_reg_file)
 
     menu_update = self.atfa_menu.Append(wx.ID_ANY, self.MENU_ATFA_UPDATE)
     self.Bind(wx.EVT_MENU, self.OnUpdateAtfa, menu_update)
@@ -991,7 +1012,7 @@ class Atft(wx.Frame):
     if not self.atft_manager.atfa_dev:
       self._SendAlertEvent(self.ALERT_PROV_NO_ATFA)
       return
-    if self.atft_manager.GetATFAKeysLeft() == 0:
+    if self._GetCachedATFAKeysLeft() == 0:
       self._SendAlertEvent(self.ALERT_PROV_NO_KEYS)
       return
     self._CreateThread(self._ManualProvision, selected_serials)
@@ -1111,7 +1132,7 @@ class Atft(wx.Frame):
             self.atft_manager.product_info.product_name)
         # User choose a new product, reset how many keys left.
         if self.atft_manager.atfa_dev and self.atft_manager.product_info:
-          self._CheckATFAStatus()
+          self._UpdateKeysLeftInATFA()
     except IOError:
       self._SendAlertEvent(self.ALERT_CANNOT_OPEN_FILE + pathname)
     except ProductAttributesFileFormatError:
@@ -1137,6 +1158,41 @@ class Atft(wx.Frame):
         self.configs['DEFAULT_KEY_THRESHOLD'] = str(self.key_threshold)
       except ValueError:
         pass
+
+  def OnGetRegFile(self, event):
+    """Download the registration file from the atfa device.
+
+    Args:
+      event: The triggering event.
+    """
+    message = self.DIALOG_SELECT_DIRECTORY
+    try:
+      filename = self.atft_manager.GetATFASerial() + '.reg'
+    except DeviceNotFoundException as e:
+      self._SendAlertEvent(self.ALERT_NO_ATFA)
+      return
+    callback = self._GetRegFile
+    data = self.SaveFileArg(message, filename, callback)
+    event = Event(self.save_file_event, value=data)
+    wx.QueueEvent(self, event)
+
+  def OnGetAuditFile(self, event):
+    """Download the audit file from the atfa device.
+
+    Args:
+      event: The triggering event.
+    """
+    message = self.DIALOG_SELECT_DIRECTORY
+    time = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+    try:
+      filename = self.atft_manager.GetATFASerial() + '_' + time +'.audit'
+    except DeviceNotFoundException as e:
+      self._SendAlertEvent(self.ALERT_NO_ATFA)
+      return
+    callback = self._GetAuditFile
+    data = self.SaveFileArg(message, filename, callback)
+    event = Event(self.save_file_event, value=data)
+    wx.QueueEvent(self, event)
 
   def OnStoreKey(self, event):
     """Store the keybundle to the ATFA device.
@@ -1230,11 +1286,11 @@ class Atft(wx.Frame):
     """Display how many keys left in the ATFA device.
     """
     if self.atft_manager.atfa_dev and self.atft_manager.product_info:
-      keys_left = self.atft_manager.GetATFAKeysLeft()
+      keys_left = self._GetCachedATFAKeysLeft()
       if not keys_left:
         # If keys_left is not set, try to set it.
-        self._CheckATFAStatus()
-        keys_left = self.atft_manager.GetATFAKeysLeft()
+        self._UpdateKeysLeftInATFA()
+        keys_left = self._GetCachedATFAKeysLeft()
       if keys_left and keys_left >= 0:
         self.keys_left_display.SetLabelText(str(keys_left))
         return
@@ -1328,6 +1384,9 @@ class Atft(wx.Frame):
     # Event for select a file.
     self.select_file_event = wx.NewEventType()
     self.select_file_event_bind = wx.PyEventBinder(self.select_file_event)
+    # Event for save a file.
+    self.save_file_event = wx.NewEventType()
+    self.save_file_event_bind = wx.PyEventBinder(self.save_file_event)
 
     self.Bind(self.refresh_event_bind, self.OnListDevices)
     self.Bind(self.dev_listed_event_bind, self._DeviceListedEventHandler)
@@ -1336,6 +1395,7 @@ class Atft(wx.Frame):
     self.Bind(self.print_event_bind, self._PrintEventHandler)
     self.Bind(self.low_key_alert_event_bind, self._LowKeyAlertEventHandler)
     self.Bind(self.select_file_event_bind, self._SelectFileEventHandler)
+    self.Bind(self.save_file_event_bind, self._SaveFileEventHandler)
 
     # Bind the close event
     self.Bind(wx.EVT_CLOSE, self.OnClose)
@@ -1486,6 +1546,35 @@ class Atft(wx.Frame):
       pathname = file_dialog.GetPath()
     callback(pathname)
 
+  def _SaveFileEventHandler(self, event):
+    """Show the save file window and save the file to selected folder.
+
+    This function would give user a directory selection dialog, and download
+    the files from the atfa device to a file named event.filename under the
+    selected folder.
+
+    Args:
+      event: containing data of SaveFileArg type.
+    """
+    data = event.GetValue()
+    message = data.message
+    filename = data.filename
+    callback = data.callback
+    with wx.DirDialog(
+        self, message, '', wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST
+      ) as file_dialog:
+      if file_dialog.ShowModal() == wx.ID_CANCEL:
+        return  # the user changed their mind
+      pathname = file_dialog.GetPath()
+      filepath = os.path.join(pathname, filename)
+      if os.path.isdir(filepath):
+        self._SendAlertEvent(
+            self.ALERT_CANNOT_SAVE_FILE + filepath.encode('utf-8'))
+      warning_text = filepath.encode('utf-8') + self.ALERT_FILE_EXISTS
+      if os.path.isfile(filepath) and not self._ShowWarning(warning_text):
+        return
+    callback(filepath)
+
   def _LowKeyAlertEventHandler(self, event):
     """Show the alert box to alert user that the key in ATFA device is low.
 
@@ -1545,8 +1634,8 @@ class Atft(wx.Frame):
 
       wx.QueueEvent(self, Event(self.dev_listed_event, wx.ID_ANY))
 
-  def _CheckATFAStatus(self):
-    """Get the attestation key status of the ATFA device.
+  def _UpdateKeysLeftInATFA(self):
+    """Update the number of keys left in ATFA.
 
     Update the number of keys left for the selected product in the ATFA device.
 
@@ -1558,7 +1647,7 @@ class Atft(wx.Frame):
     self.PauseRefresh()
 
     try:
-      self.atft_manager.CheckATFAStatus()
+      self.atft_manager.UpdateATFAKeysLeft()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException('W', e, operation)
@@ -1575,12 +1664,20 @@ class Atft(wx.Frame):
     self._SendOperationSucceedEvent(operation)
     return True
 
+  def _GetCachedATFAKeysLeft(self):
+    """Get the cached number of keys left in the ATFA device.
+
+    Returns:
+      The cached number of keys left in the ATFA.
+    """
+    return self.atft_manager.GetCachedATFAKeysLeft()
+
   def _ShowATFAStatus(self):
     """Show the attestation key status of the ATFA device.
     """
-    if self._CheckATFAStatus():
+    if self._UpdateKeysLeftInATFA():
       self._SendAlertEvent(
-          'There are ' + str(self.atft_manager.GetATFAKeysLeft()) +
+          'There are ' + str(self._GetCachedATFAKeysLeft()) +
           ' keys left for this product in the ATFA device.')
 
   def _FuseVbootKey(self, selected_serials):
@@ -1795,8 +1892,8 @@ class Atft(wx.Frame):
     operation = 'Check ATFA Status'
     threshold = self.key_threshold
 
-    if self._CheckATFAStatus():
-      keys_left = self.atft_manager.GetATFAKeysLeft()
+    if self._UpdateKeysLeftInATFA():
+      keys_left = self._GetCachedATFAKeysLeft()
       if keys_left and keys_left >= 0 and keys_left <= threshold:
         # If the confirmed number is lower than threshold, fire low key event.
         self._SendLowKeyAlertEvent()
@@ -1911,7 +2008,7 @@ class Atft(wx.Frame):
     except FastbootFailure as e:
       self._HandleException('E', e, operation, target)
       # If it fails, one key might also be used.
-      self._CheckATFAStatus()
+      self._UpdateKeysLeftInATFA()
       return
     finally:
       self.ResumeRefresh()
@@ -1950,7 +2047,7 @@ class Atft(wx.Frame):
         continue
       elif not target.provision_state.provisioned:
         self._ProvisionTarget(target)
-        if self.atft_manager.GetATFAKeysLeft() == 0:
+        if self._GetCachedATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
           self.OnToggleAutoProv(None)
@@ -1981,7 +2078,7 @@ class Atft(wx.Frame):
 
     # Check ATFA status after new key stored.
     if self.atft_manager.product_info:
-      self._CheckATFAStatus()
+      self._UpdateKeysLeftInATFA()
 
   def _UpdateATFA(self, pathname):
     """Ask ATFA device to store and process the stored keybundle.
@@ -1999,7 +2096,7 @@ class Atft(wx.Frame):
 
       # Check ATFA status after update succeeds.
       if self.atft_manager.product_info:
-        self._CheckATFAStatus()
+        self._UpdateKeysLeftInATFA()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException('W', e, operation)
@@ -2032,6 +2129,58 @@ class Atft(wx.Frame):
       self._HandleException('E', e, operation)
       self._SendAlertEvent(
           self.ALERT_PURGE_KEY_FAILURE + e.msg.encode('utf-8'))
+      return
+    finally:
+      self.ResumeRefresh()
+
+  def _GetRegFile(self, filepath):
+    self._GetFileFromATFA(filepath, 'reg')
+
+  def _GetAuditFile(self, filepath):
+    self._GetFileFromATFA(filepath, 'audit')
+
+  def _GetFileFromATFA(self, filepath, file_type):
+    """Download a type of file from the ATFA device.
+
+    Args:
+      file_type: The type of the file to be downloaded. Supported options are
+        'reg'/'audit'.
+    Args:
+      pathname: The path to the downloaded file.
+    """
+    if file_type == 'audit':
+      alert_message = self.ALERT_AUDIT_DOWNLOADED
+      alert_cannot_get_file_message = self.ALERT_CANNOT_GET_AUDIT
+    elif file_type == 'reg':
+      alert_message = self.ALERT_REG_DOWNLOADED
+      alert_cannot_get_file_message = self.ALERT_CANNOT_GET_REG
+    else:
+      # Should not reach here.
+      return
+    operation = 'ATFA device prepare and download ' + file_type + ' file'
+    self._SendOperationStartEvent(operation)
+    self.PauseRefresh()
+    filepath = filepath.encode('utf-8')
+    try:
+      write_file = open(filepath, 'w+')
+      write_file.close()
+      self.atft_manager.PrepareFile(file_type)
+      self.atft_manager.atfa_dev.Upload(filepath)
+      self._SendOperationSucceedEvent(operation)
+      self._SendAlertEvent(alert_message + filepath)
+    except DeviceNotFoundException as e:
+      e.SetMsg('No Available ATFA!')
+      self._HandleException('W', e, operation)
+      self._SendAlertEvent(self.ALERT_NO_ATFA)
+      return
+    except IOError as e:
+      self._HandleException('E', e)
+      self._SendAlertEvent(self.ALERT_CANNOT_SAVE_FILE + filepath)
+      return
+    except FastbootFailure as e:
+      self._HandleException('E', e)
+      self._SendAlertEvent(
+          alert_cannot_get_file_message + e.msg.encode('utf-8'))
       return
     finally:
       self.ResumeRefresh()
