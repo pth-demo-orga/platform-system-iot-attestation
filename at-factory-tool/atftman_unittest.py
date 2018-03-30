@@ -1019,24 +1019,6 @@ class AtftManTest(unittest.TestCase):
     mock_remove.assert_called_once_with(self.TEST_FILE_NAME)
     mock_target.Oem.assert_called_once_with('fuse at-bootloader-vboot-key')
 
-  @patch('os.remove')
-  @patch('tempfile.NamedTemporaryFile')
-  def testFuseVbootKeyFailed(self, mock_create_temp_file, _):
-    mock_file = MagicMock()
-    mock_create_temp_file.return_value = mock_file
-    mock_file.name = self.TEST_FILE_NAME
-
-    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
-                                       self.mock_serial_mapper, self.configs)
-    atft_manager.product_info = ProductInfo(
-        self.TEST_ID, self.TEST_NAME, self.TEST_ATTRIBUTE_ARRAY,
-        self.TEST_VBOOT_KEY_ARRAY)
-    mock_target = MagicMock()
-    atft_manager.CheckProvisionStatus = MagicMock()
-    atft_manager.CheckProvisionStatus.side_effect = self.MockSetFuseVbootFail
-    with self.assertRaises(FastbootFailure):
-      atft_manager.FuseVbootKey(mock_target)
-
   def testFuseVbootKeyNoProduct(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)

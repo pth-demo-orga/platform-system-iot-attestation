@@ -26,6 +26,7 @@ import math
 import os
 import sys
 import threading
+import time
 
 from atftman import AtftManager
 from atftman import ProvisionStatus
@@ -2909,6 +2910,40 @@ class Atft(wx.Frame):
 
     try:
       self.atft_manager.FuseVbootKey(target)
+      self._SendOperationSucceedEvent(operation, target)
+
+      operation = 'Verify bootloader locked, rebooting'
+      self._SendOperationStartEvent(operation, target)
+
+      # If the device would reboot after fusing vboot key, need to wait for
+      # device to disappear, then the reboot command would hold until the
+      # device is back online.
+      time.sleep(1)
+
+      success_msg = '{' + str(target) + '} ' + 'Reboot Succeed'
+      timeout_msg = '{' + str(target) + '} ' + 'Reboot Failed! Timeout!'
+      reboot_lock = threading.Lock()
+      reboot_lock.acquire()
+
+      def LambdaSuccessCallback(msg=success_msg, lock=reboot_lock):
+        self._RebootSuccessCallback(msg, lock)
+
+      def LambdaTimeoutCallback(msg=timeout_msg, lock=reboot_lock):
+        self._RebootTimeoutCallback(msg, lock)
+
+      # Reboot the device to verify the bootloader is locked.
+      target.provision_status = ProvisionStatus.REBOOT_ING
+      wx.QueueEvent(self, Event(self.dev_listed_event, wx.ID_ANY))
+
+      # Reboot would change device status, so we disable reading device status
+      # during reboot.
+      try:
+        self.listing_device_lock.acquire()
+        self.atft_manager.Reboot(
+            target, self.REBOOT_TIMEOUT, LambdaSuccessCallback,
+            LambdaTimeoutCallback)
+      finally:
+        self.listing_device_lock.release()
     except ProductNotSpecifiedException as e:
       self._HandleException('W', e, operation)
       return
@@ -2918,37 +2953,6 @@ class Atft(wx.Frame):
     finally:
       self.ResumeRefresh()
 
-    self._SendOperationSucceedEvent(operation, target)
-
-    operation = 'Verify bootloader locked, rebooting'
-    self._SendOperationStartEvent(operation, target)
-    success_msg = '{' + str(target) + '} ' + 'Reboot Succeed'
-    timeout_msg = '{' + str(target) + '} ' + 'Reboot Failed! Timeout!'
-    reboot_lock = threading.Lock()
-    reboot_lock.acquire()
-
-    def LambdaSuccessCallback(msg=success_msg, lock=reboot_lock):
-      self._RebootSuccessCallback(msg, lock)
-
-    def LambdaTimeoutCallback(msg=timeout_msg, lock=reboot_lock):
-      self._RebootTimeoutCallback(msg, lock)
-
-    # Reboot the device to verify the bootloader is locked.
-    try:
-      target.provision_status = ProvisionStatus.REBOOT_ING
-      wx.QueueEvent(self, Event(self.dev_listed_event, wx.ID_ANY))
-
-      # Reboot would change device status, so we disable reading device status
-      # during reboot.
-      self.listing_device_lock.acquire()
-      self.atft_manager.Reboot(
-          target, self.REBOOT_TIMEOUT, LambdaSuccessCallback,
-          LambdaTimeoutCallback)
-    except FastbootFailure as e:
-      self._HandleException('E', e, operation)
-      return
-    finally:
-      self.listing_device_lock.release()
 
     # Wait until callback finishes. After the callback, reboot_lock would be
     # released.

@@ -652,7 +652,8 @@ class AtftTest(unittest.TestCase):
     target.provision_state.bootloader_locked = True
 
   @patch('wx.QueueEvent')
-  def testFuseVbootKey(self, mock_queue_event):
+  @patch('time.sleep')
+  def testFuseVbootKey(self, mock_sleep, mock_queue_event):
     mock_atft = MockAtft()
     mock_atft.dev_listed_event = MagicMock()
     mock_atft.PauseRefresh = MagicMock()
@@ -681,7 +682,8 @@ class AtftTest(unittest.TestCase):
     mock_queue_event.assert_called()
 
   @patch('wx.QueueEvent')
-  def testFuseVbootKeyExceptions(self, mock_queue_event):
+  @patch('time.sleep')
+  def testFuseVbootKeyExceptions(self, mock_sleep, mock_queue_event):
     mock_atft = MockAtft()
     mock_atft.dev_listed_event = MagicMock()
     mock_atft.PauseRefresh = MagicMock()
