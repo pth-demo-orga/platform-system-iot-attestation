@@ -2303,14 +2303,14 @@ class Atft(wx.Frame):
       if not self.atft_manager.atfa_dev or not self.atft_manager.product_info:
         raise DeviceNotFoundException
       keys_left = self.atft_manager.GetCachedATFAKeysLeft()
-      if not keys_left:
+      if not keys_left and keys_left != 0:
         # If keys_left is not set, try to set it.
         self._UpdateKeysLeftInATFA()
         keys_left = self.atft_manager.GetCachedATFAKeysLeft()
+      text = self.TITLE_KEYS_LEFT + str(keys_left)
       if not keys_left or keys_left < 0:
         raise NoKeysException
 
-      text = self.TITLE_KEYS_LEFT + str(keys_left)
       first_warning = self.change_threshold_dialog.GetFirstWarning()
       second_warning = self.change_threshold_dialog.GetSecondWarning()
       if first_warning and keys_left < first_warning:
@@ -3306,11 +3306,12 @@ class Atft(wx.Frame):
     """Purge the key for the selected product in the ATFA device.
     """
     operation = 'ATFA purge key'
-    self._SendOperationStartEvent()
+    self._SendOperationStartEvent(operation)
     self.PauseRefresh()
     try:
       self.atft_manager.PurgeATFAKey()
       self._SendOperationSucceedEvent(operation)
+      self._UpdateKeysLeftInATFA()
     except ProductNotSpecifiedException as e:
       self._HandleException('W', e, operation)
       return

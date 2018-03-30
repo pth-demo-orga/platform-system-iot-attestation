@@ -459,10 +459,9 @@ class AtftTest(unittest.TestCase):
     mock_atft.change_threshold_dialog.GetSecondWarning.return_value = None
     keys_left_array = []
     mock_atft.atft_manager.GetCachedATFAKeysLeft = MagicMock()
-    mock_atft.atft_manager.GetCachedATFAKeysLeft.side_effect = (
-        lambda: self.MockGetKeysLeft(keys_left_array))
+    mock_atft.atft_manager.GetCachedATFAKeysLeft.return_value = 0
     mock_atft._HandleKeysLeft()
-    mock_atft._SetStatusTextColor.assert_called_once_with('', mock_black)
+    mock_atft._SetStatusTextColor.assert_called_once_with('0', mock_black)
 
   # The statusbar should change color if the key is lower than threshold.
   def testHandleKeysLeftChangeStatusColor(self):
