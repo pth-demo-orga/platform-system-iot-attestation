@@ -83,3 +83,7 @@ class OsVersionNotCompatibleException(AtftBaseException):
     AtftBaseException.__init__(self)
     self.device = device
     self.version = version
+
+
+class NoKeysException(AtftBaseException):
+  pass

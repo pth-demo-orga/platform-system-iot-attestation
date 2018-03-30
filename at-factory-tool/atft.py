@@ -34,6 +34,7 @@ from atftman import RebootCallback
 from fastboot_exceptions import DeviceCreationException
 from fastboot_exceptions import DeviceNotFoundException
 from fastboot_exceptions import FastbootFailure
+from fastboot_exceptions import NoKeysException
 from fastboot_exceptions import OsVersionNotAvailableException
 from fastboot_exceptions import OsVersionNotCompatibleException
 from fastboot_exceptions import ProductAttributesFileFormatError
@@ -1383,11 +1384,17 @@ class Atft(wx.Frame):
     self.statusbar = self.CreateStatusBar(1, style=wx.STB_DEFAULT_STYLE)
     self.statusbar.SetBackgroundColour(self.COLOR_BLACK)
     self.statusbar.SetForegroundColour(self.COLOR_WHITE)
-    self.statusbar.SetStatusText(self.TITLE_KEYS_LEFT)
+    status_sizer = wx.BoxSizer(wx.VERTICAL)
+    self.status_text = wx.StaticText(
+        self.statusbar, wx.ID_ANY, self.TITLE_KEYS_LEFT)
+    status_sizer.AddSpacer(5)
+    status_sizer.Add(self.status_text, 0, wx.LEFT, 10)
     statusbar_font = wx.Font(
         10, wx.FONTFAMILY_MODERN, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
-    self.statusbar.SetFont(statusbar_font)
+    self.status_text.SetFont(statusbar_font)
+    self.status_text.SetForegroundColour(self.COLOR_WHITE)
     self.statusbar.SetSize(0, 35)
+    self.statusbar.SetSizer(status_sizer)
     # Add the spacer for statusbar
     self.main_box.AddSpacer(40)
 
@@ -2106,7 +2113,44 @@ class Atft(wx.Frame):
   def _HandleKeysLeft(self):
     """Display how many keys left in the ATFA device.
     """
-    pass
+    text = self.TITLE_KEYS_LEFT
+    color = self.COLOR_BLACK
+
+    try:
+      if not self.atft_manager.atfa_dev or not self.atft_manager.product_info:
+        raise DeviceNotFoundException
+      keys_left = self.atft_manager.GetATFAKeysLeft()
+      if not keys_left:
+        # If keys_left is not set, try to set it.
+        self._CheckATFAStatus()
+        keys_left = self.atft_manager.GetATFAKeysLeft()
+      if not keys_left or keys_left < 0:
+        raise NoKeysException
+
+      text = self.TITLE_KEYS_LEFT + str(keys_left)
+      first_warning = self.change_threshold_dialog.GetFirstWarning()
+      second_warning = self.change_threshold_dialog.GetSecondWarning()
+      if first_warning and keys_left < first_warning:
+        color = self.COLOR_YELLOW
+      if second_warning and keys_left < second_warning:
+        color = self.COLOR_RED
+      self._SetStatusTextColor(text, color)
+    except (DeviceNotFoundException, NoKeysException):
+      self._SetStatusTextColor(text, color)
+
+  def _SetStatusTextColor(self, text, color):
+    """Set the background color and the text for the status bar.
+
+    Args:
+      text: The text to be displayed on the status bar.
+      color: The background color.
+    """
+    if self.statusbar.GetBackgroundColour() != color:
+      self.statusbar.SetBackgroundColour(color)
+      self.statusbar.Refresh()
+    if self.statusbar.GetStatusText().encode('utf-8') != text:
+      self.status_text.SetLabel(text)
+      self.statusbar.Refresh()
 
   def _ShowWarning(self, text):
     """Show a warning to the user.
@@ -2464,6 +2508,24 @@ class Atft(wx.Frame):
     dev_component.status_wrapper.Layout()
     dev_component.status_background.SetBackgroundColour(color)
     dev_component.status_background.Refresh()
+
+  def _GetStatusColor(self, status):
+    """Get the color according to the status.
+
+    Args:
+      status: The target device status.
+    Returns:
+      The color to be shown for the status.
+    """
+    if status == None:
+      return self.COLOR_GREY
+    if status == ProvisionStatus.IDLE:
+      return self.COLOR_GREY
+    if status == ProvisionStatus.PROVISION_SUCCESS:
+      return self.COLOR_GREEN
+    if ProvisionStatus.isFailed(status):
+      return self.COLOR_RED
+    return self.COLOR_BLUE
 
   def _SelectFileEventHandler(self, event):
     """Show the select file window.
@@ -2840,7 +2902,7 @@ class Atft(wx.Frame):
     operation = 'Check ATFA Status'
 
     if self._UpdateKeysLeftInATFA():
-      keys_left = self.atft_manager._GetCachedATFAKeysLeft()
+      keys_left = self._GetCachedATFAKeysLeft()
       if keys_left and keys_left >= 0:
         first_warning = self.change_threshold_dialog.GetFirstWarning()
         second_warning = self.change_threshold_dialog.GetSecondWarning()
