@@ -281,6 +281,156 @@ class Event(wx.PyCommandEvent):
     """
     return self._value
 
+
+class ChangeThresholdDialog(wx.Dialog):
+  """The dialog class to ask user to change key warning threshold."""
+
+  def GetFirstWarning(self):
+    """Get the first warning value.
+
+    Returns:
+      The first warning value.
+    """
+    return self.first_warning
+
+  def GetSecondWarning(self):
+    """Get the second warning value.
+
+    Returns:
+      The second warning value.
+    """
+    return self.second_warning
+
+  def __init__(self, atft):
+    """Initiate the dialog using the atft class instance.
+
+    Args:
+      atft: The atft class instance.
+    """
+    self.atft = atft
+    self.first_warning = self.atft.DEFAULT_KEY_THRESHOLD_1
+    self.second_warning = self.atft.DEFAULT_KEY_THRESHOLD_2
+
+  def CreateDialog(self, *args, **kwargs):
+    """The actual initializer to create the dialog.
+
+    This function creates UI elements within the dialog and only need to be
+    called once. This function should be called with the same argument for
+    wx.Dialog class and should be called as part of the initialization after
+    using __init__.
+    """
+    super(ChangeThresholdDialog, self).__init__(*args, **kwargs)
+    self.SetForegroundColour(wx.Colour(0, 0, 0))
+    panel_sizer = wx.BoxSizer(wx.VERTICAL)
+    self.SetSizer(panel_sizer)
+    self.SetSize(300, 250)
+
+    dialog_title = wx.StaticText(
+        self, wx.ID_ANY, self.atft.DIALOG_CHANGE_THRESHOLD_TEXT)
+    title_font = wx.Font(14, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    dialog_title.SetFont(title_font)
+    panel_sizer.Add(dialog_title, 0, wx.ALL, 20)
+
+    line_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    first_warning_hint = wx.StaticText(
+        self, wx.ID_ANY, self.atft.TITLE_FIRST_WARNING)
+    line_sizer.Add(first_warning_hint, 0, wx.TOP, 5)
+    self.first_warning_input = wx.TextCtrl(self, wx.ID_ANY, '')
+    line_sizer.Add(self.first_warning_input, 0, wx.LEFT, 10)
+    panel_sizer.Add(line_sizer, 0, wx.LEFT, 20)
+    font = wx.Font(10, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    first_warning_hint.SetFont(font)
+    self.first_warning_input.SetFont(font)
+
+    panel_sizer.AddSpacer(10)
+
+    line_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    second_warning_hint = wx.StaticText(
+        self, wx.ID_ANY, self.atft.TITLE_SECOND_WARNING)
+    line_sizer.Add(second_warning_hint, 0, wx.TOP, 5)
+    self.second_warning_input = wx.TextCtrl(
+        self, wx.ID_ANY, '')
+    line_sizer.Add(self.second_warning_input, 0, wx.LEFT, 10)
+    panel_sizer.Add(line_sizer, 0, wx.LEFT, 20)
+    font = wx.Font(10, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    second_warning_hint.SetFont(font)
+    self.second_warning_input.SetFont(font)
+
+    panel_sizer.AddSpacer(40)
+
+    button_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    button_font = wx.Font(12, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    button_cancel = wx.Button(
+        self, label=self.atft.BUTTON_CANCEL, size=(130, 30), id=wx.ID_CANCEL)
+    button_save = wx.Button(
+        self, label=self.atft.BUTTON_SAVE, size=(130, 30), id=wx.ID_OK)
+    button_save.SetFont(button_font)
+    button_cancel.SetFont(button_font)
+    button_sizer.Add(button_cancel, 0)
+    button_sizer.Add(button_save, 0, wx.LEFT, 5)
+    panel_sizer.Add(button_sizer, 0, wx.ALIGN_CENTER)
+
+    button_save.Bind(wx.EVT_BUTTON, self.OnSave)
+
+  def ShowModal(self):
+    """Show the dialog.
+
+    This function would set default value and call wx.Dialog.ShowModal.
+    """
+    self.first_warning_input.Clear()
+    if self.first_warning:
+      self.first_warning_input.AppendText(str(self.first_warning))
+    self.second_warning_input.Clear()
+    if self.second_warning:
+      self.second_warning_input.AppendText(str(self.second_warning))
+    return super(ChangeThresholdDialog, self).ShowModal()
+
+  def OnSave(self, e):
+    """Change warning dialog save callback.
+
+    We allow user to:
+    No warning: first warning and second warning empty
+    One warning: first warning not empty, second warning empty
+    Two warnings: first warning not empty, second warning not empty.
+
+    Args:
+      e: The triggering event.
+    """
+    first_warning = self.first_warning_input.GetValue()
+    second_warning = self.second_warning_input.GetValue()
+    if not first_warning and second_warning:
+      # Do not allow second warning set while first warning is not.
+      return
+    try:
+      if not second_warning:
+        if not first_warning:
+          # No warning
+          self.first_warning = None
+          self.second_warning = None
+        else:
+          # User disable second warning
+          self.second_warning = None
+          first_warning_number = int(first_warning)
+          if first_warning_number <= 0:
+            return
+          self.first_warning = first_warning_number
+      else:
+        # Second warning set.
+        first_warning_number = int(first_warning)
+        second_warning_number = int(second_warning)
+        if first_warning_number <= 0 or second_warning_number <= 0:
+          # Invalid setting, just ignore.
+          return
+        if second_warning_number >= first_warning_number:
+          return
+        self.first_warning = first_warning_number
+        self.second_warning = second_warning_number
+    except ValueError:
+      # If any field is invalid, let user input again.
+      return
+    self.EndModal(0)
+
+
 class Atft(wx.Frame):
   """wxpython class to handle all GUI commands for the ATFA.
 
@@ -408,7 +558,8 @@ class Atft(wx.Frame):
     self.ATFT_VERSION = 'v0.0'
     self.COMPATIBLE_ATFA_VERSION = '0'
     self.DEVICE_REFRESH_INTERVAL = 1.0
-    self.DEFAULT_KEY_THRESHOLD = 0
+    self.DEFAULT_KEY_THRESHOLD_1 = None
+    self.DEFAULT_KEY_THRESHOLD_2 = None
     self.LOG_DIR = None
     self.LOG_SIZE = 0
     self.LOG_FILE_NUMBER = 0
@@ -439,6 +590,10 @@ class Atft(wx.Frame):
       self.ATFT_VERSION = str(configs['ATFT_VERSION'])
       self.COMPATIBLE_ATFA_VERSION = str(configs['COMPATIBLE_ATFA_VERSION'])
       self.DEVICE_REFRESH_INTERVAL = float(configs['DEVICE_REFRESH_INTERVAL'])
+      if 'DEFAULT_KEY_THRESHOLD_1' in configs:
+        self.DEFAULT_KEY_THRESHOLD_1 = int(configs['DEFAULT_KEY_THRESHOLD_1'])
+      if 'DEFAULT_KEY_THRESHOLD_2' in configs:
+        self.DEFAULT_KEY_THRESHOLD_2 = int(configs['DEFAULT_KEY_THRESHOLD_2'])
       self.LOG_DIR = str(configs['LOG_DIR'])
       self.LOG_SIZE = int(configs['LOG_SIZE'])
       self.LOG_FILE_NUMBER = int(configs['LOG_FILE_NUMBER'])
@@ -542,6 +697,8 @@ class Atft(wx.Frame):
     self.TITLE_KEYS_LEFT = ['Attestation Keys Left:', '剩余密钥:'][index]
     self.TITLE_TARGET_DEV = ['Target Devices', '目标设备'][index]
     self.TITLE_COMMAND_OUTPUT = ['Command Output', '控制台输出'][index]
+    self.TITLE_FIRST_WARNING = ['1st\twarning: ', '警告一：'][index]
+    self.TITLE_SECOND_WARNING = ['2nd\twarning: ', '警告二：'][index]
 
     # Field names
     self.FIELD_SERIAL_NUMBER = ['SN', '序列号'][index]
@@ -571,6 +728,8 @@ class Atft(wx.Frame):
     # Buttons
     self.BUTTON_ENTER_SUP_MODE = ['Enter Supervisor Mode', '进入管理模式'][index]
     self.BUTTON_LEAVE_SUP_MODE = ['Leave Supervisor Mode', '离开管理模式'][index]
+    self.BUTTON_CANCEL = ['Cancel', '取消'][index]
+    self.BUTTON_SAVE = ['Save', '保存'][index]
 
     # Alerts
     self.ALERT_NO_ATFA = [
@@ -652,6 +811,12 @@ class Atft(wx.Frame):
         'Detected an ATFA device having incompatible version with this tool, '
         'please upgrade your ATFA device to the latest version!',
         '检测到一个与这个软件不兼容的ATFA设备，请升级你的ATFA设备！'][index]
+    self.ALERT_ADD_MORE_KEY = [
+        lambda keys_left:
+            'Warning - add more keys\n'
+            'There are ' + str(keys_left) + ' keys left.',
+        lambda keys_left:
+            '警告！请添加更多密钥！当前剩余密钥：' + str(keys_left)][index]
     self.ALERT_PROCESS_KEY_FAILURE = [
         'Process key failed, Error: ',
         '处理密钥文件失败！错误信息：'][index]
@@ -735,6 +900,13 @@ class Atft(wx.Frame):
     self.SetTitle(self.TITLE)
     self.panel.SetSizerAndFit(self.main_box)
     self.Show(True)
+
+    # Change Key Threshold Dialog
+    self.change_threshold_dialog = ChangeThresholdDialog(self)
+    self.change_threshold_dialog.CreateDialog(
+        self,
+        wx.ID_ANY,
+        self.DIALOG_CHANGE_THRESHOLD_TITLE)
 
     # Low Key Alert Dialog
     self.low_key_dialog = wx.MessageDialog(
@@ -1560,26 +1732,25 @@ class Atft(wx.Frame):
       self._SendAlertEvent(self.ALERT_PRODUCT_FILE_FORMAT_WRONG)
       self._HandleException('W', e)
 
+
   def OnChangeKeyThreshold(self, event):
     """Change the threshold for low number of key warning.
 
     Args:
       event: The button click event.
     """
-    self.change_threshold_dialog.SetValue(str(self.key_threshold))
-    self.change_threshold_dialog.CenterOnParent()
-    if self.change_threshold_dialog.ShowModal() == wx.ID_OK:
-      value = self.change_threshold_dialog.GetValue()
-      try:
-        number = int(value)
-        if number <= 0:
-          # Invalid setting, just ignore.
-          return
-        self.key_threshold = number
-        # Update the configuration.
-        self.configs['DEFAULT_KEY_THRESHOLD'] = str(self.key_threshold)
-      except ValueError:
-        pass
+    self.change_threshold_dialog.ShowModal()
+    # Update the configuration
+    first_warning = self.change_threshold_dialog.GetFirstWarning()
+    second_warning = self.change_threshold_dialog.GetSecondWarning()
+    if first_warning:
+      self.configs['DEFAULT_KEY_THRESHOLD_1'] = str(first_warning)
+    elif 'DEFAULT_KEY_THRESHOLD_1' in self.configs:
+      del self.configs['DEFAULT_KEY_THRESHOLD_1']
+    if second_warning:
+      self.configs['DEFAULT_KEY_THRESHOLD_2'] = str(second_warning)
+    elif 'DEFAULT_KEY_THRESHOLD_2' in self.configs:
+      del self.configs['DEFAULT_KEY_THRESHOLD_2']
 
   def OnGetRegFile(self, event):
     """Download the registration file from the atfa device.
@@ -1894,13 +2065,16 @@ class Atft(wx.Frame):
     """
     wx.QueueEvent(self, Event(self.dev_listed_event))
 
-  def _SendLowKeyAlertEvent(self):
+  def _SendLowKeyAlertEvent(self, keys_left):
     """Send low key alert event.
 
     Send an event to indicate the keys left in the ATFA device is lower than
     threshold.
+
+    Args:
+      keys_left: The number of keys left.
     """
-    wx.QueueEvent(self, Event(self.low_key_alert_event))
+    wx.QueueEvent(self, Event(self.low_key_alert_event, value=keys_left))
 
   def _AlertEventHandler(self, event):
     """The handler to handle the event to display an alert box.
@@ -2058,14 +2232,8 @@ class Atft(wx.Frame):
     Args:
       event: The triggering event.
     """
-    if self.low_key_alert_shown:
-      # If already shown once in this auto provisioning mode
-      # Then do not show again.
-      return
-    self.low_key_alert_shown = True
-    self.low_key_dialog.SetMessage(
-        'The attestation keys available in this ATFA device is lower than ' +
-        str(self.key_threshold) + ' for this product!')
+    keys_left = event.GetValue()
+    self.low_key_dialog.SetMessage(self.ALERT_ADD_MORE_KEY(keys_left))
     self.low_key_dialog.CenterOnParent()
     self.low_key_dialog.ShowModal()
 
@@ -2371,13 +2539,26 @@ class Atft(wx.Frame):
     If so, an alert box would appear to warn the user.
     """
     operation = 'Check ATFA Status'
-    threshold = self.key_threshold
 
     if self._UpdateKeysLeftInATFA():
-      keys_left = self._GetCachedATFAKeysLeft()
-      if keys_left and keys_left >= 0 and keys_left <= threshold:
-        # If the confirmed number is lower than threshold, fire low key event.
-        self._SendLowKeyAlertEvent()
+      keys_left = self.atft_manager._GetCachedATFAKeysLeft()
+      if keys_left and keys_left >= 0:
+        first_warning = self.change_threshold_dialog.GetFirstWarning()
+        second_warning = self.change_threshold_dialog.GetSecondWarning()
+        if (second_warning and keys_left < second_warning and
+            not self.second_key_alert_shown):
+          self.second_key_alert_shown = True
+          if not self.first_key_alert_shown:
+            # If already past the first alert and second alert is shown,
+            # We would not show the first alert again.
+            self.first_key_alert_shown = True
+          self._SendLowKeyAlertEvent(keys_left)
+          return
+
+        if keys_left < first_warning and not self.first_key_alert_shown:
+          self.first_key_alert_shown = True
+          self._SendLowKeyAlertEvent(keys_left)
+          return
 
   def _Reboot(self):
     """Reboot ATFA device.
@@ -2427,8 +2608,9 @@ class Atft(wx.Frame):
     Args:
       selected_serials: A list of the serial numbers of the target devices.
     """
-    # Reset low_key_alert_shown
-    self.low_key_alert_shown = False
+    # Reset alert_shown
+    self.first_key_alert_shown = False
+    self.second_key_alert_shown = False
     pending_targets = []
     for serial in selected_serials:
       target_dev = self.atft_manager.GetTargetDevice(serial)
