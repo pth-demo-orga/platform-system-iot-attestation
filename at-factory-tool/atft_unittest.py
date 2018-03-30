@@ -379,10 +379,10 @@ class AtftTest(unittest.TestCase):
   def testHandleKeysLeft(self):
     mock_atft = MockAtft()
     keys_left_array = []
-    mock_atft.atft_manager.GetATFAKeysLeft = MagicMock()
-    mock_atft.atft_manager.GetATFAKeysLeft.side_effect = (
+    mock_atft.atft_manager.GetCachedATFAKeysLeft = MagicMock()
+    mock_atft.atft_manager.GetCachedATFAKeysLeft.side_effect = (
         lambda: self.MockGetKeysLeft(keys_left_array))
-    mock_atft.atft_manager.CheckATFAStatus.side_effect = (
+    mock_atft.atft_manager.UpdateATFAKeysLeft.side_effect = (
         lambda: self.MockSetKeysLeft(keys_left_array))
     mock_atft.keys_left_display = MagicMock()
     mock_atft._HandleKeysLeft()
@@ -391,19 +391,19 @@ class AtftTest(unittest.TestCase):
   def testHandleKeysLeftKeysNotNone(self):
     mock_atft = MockAtft()
     keys_left_array = [10]
-    mock_atft.atft_manager.GetATFAKeysLeft = MagicMock()
-    mock_atft.atft_manager.GetATFAKeysLeft.side_effect = (
+    mock_atft.atft_manager.GetCachedATFAKeysLeft = MagicMock()
+    mock_atft.atft_manager.GetCachedATFAKeysLeft.side_effect = (
         lambda: self.MockGetKeysLeft(keys_left_array))
     mock_atft.keys_left_display = MagicMock()
     mock_atft._HandleKeysLeft()
     mock_atft.keys_left_display.SetLabelText.assert_called_once_with('10')
-    mock_atft.atft_manager.CheckATFAStatus.assert_not_called()
+    mock_atft.atft_manager.UpdateATFAKeysLeft.assert_not_called()
 
   def testHandleKeysLeftKeysNone(self):
     mock_atft = MockAtft()
     keys_left_array = []
-    mock_atft.atft_manager.GetATFAKeysLeft = MagicMock()
-    mock_atft.atft_manager.GetATFAKeysLeft.side_effect = (
+    mock_atft.atft_manager.GetCachedATFAKeysLeft = MagicMock()
+    mock_atft.atft_manager.GetCachedATFAKeysLeft.side_effect = (
         lambda: self.MockGetKeysLeft(keys_left_array))
     mock_atft.keys_left_display = MagicMock()
     mock_atft._HandleKeysLeft()
@@ -634,14 +634,14 @@ class AtftTest(unittest.TestCase):
     self.assertEqual(True, test_dev1.provision_state.provisioned)
 
   # Test atft._CheckATFAStatus
-  def testCheckATFAStatus(self):
+  def testUpdateATFAKeysLeft(self):
     mock_atft = MockAtft()
     mock_atft.PauseRefresh = MagicMock()
     mock_atft.ResumeRefresh = MagicMock()
     mock_atft._SendStartMessageEvent = MagicMock()
     mock_atft._SendSucceedMessageEvent = MagicMock()
-    mock_atft._CheckATFAStatus()
-    mock_atft.atft_manager.CheckATFAStatus.assert_called()
+    mock_atft._UpdateKeysLeftInATFA()
+    mock_atft.atft_manager.UpdateATFAKeysLeft.assert_called()
 
   # Test atft._FuseVbootKey
   def MockGetTargetDevice(self, serial):
@@ -923,7 +923,7 @@ class AtftTest(unittest.TestCase):
     self.assertEqual(2, mock_atft._HandleException.call_count)
 
   # Test atft._CheckLowKeyAlert
-  def MockCheckATFAStatus(self):
+  def MockGetATFAKeysLeft(self):
     return self.atfa_keys
 
   def MockSuccessProvision(self, target):
@@ -942,8 +942,8 @@ class AtftTest(unittest.TestCase):
     mock_atft.key_threshold = 100
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
-    mock_atft.atft_manager.GetATFAKeysLeft.side_effect = (
-        self.MockCheckATFAStatus)
+    mock_atft.atft_manager.GetCachedATFAKeysLeft.side_effect = (
+        self.MockGetATFAKeysLeft)
     self.atfa_keys = 102
     # First provision succeed
     # First check 101 left, no alert
@@ -969,17 +969,17 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendLowKeyAlertEvent = MagicMock()
     mock_atft.key_threshold = 100
     mock_atft._HandleException = MagicMock()
-    mock_atft.atft_manager.CheckATFAStatus.side_effect = (
+    mock_atft.atft_manager.UpdateATFAKeysLeft.side_effect = (
         fastboot_exceptions.FastbootFailure(''))
     mock_atft._CheckLowKeyAlert()
     mock_atft._HandleException.assert_called_once()
     mock_atft._HandleException.reset_mock()
-    mock_atft.atft_manager.CheckATFAStatus.side_effect = (
+    mock_atft.atft_manager.UpdateATFAKeysLeft.side_effect = (
         fastboot_exceptions.ProductNotSpecifiedException)
     mock_atft._CheckLowKeyAlert()
     mock_atft._HandleException.assert_called_once()
     mock_atft._HandleException.reset_mock()
-    mock_atft.atft_manager.CheckATFAStatus.side_effect = (
+    mock_atft.atft_manager.UpdateATFAKeysLeft.side_effect = (
         fastboot_exceptions.DeviceNotFoundException)
     mock_atft._CheckLowKeyAlert()
     mock_atft._HandleException.assert_called_once()
@@ -1160,7 +1160,7 @@ class AtftTest(unittest.TestCase):
     mock_atft = MockAtft()
     mock_atft.atft_manager = MagicMock()
     mock_atft.atft_manager._atfa_dev_manager = MagicMock()
-    mock_atft._CheckATFAStatus = MagicMock()
+    mock_atft._UpdateKeysLeftInATFA = MagicMock()
     mock_atft._SendOperationStartEvent = MagicMock()
     mock_atft._SendOperationSucceedEvent = MagicMock()
     mock_atft.PauseRefresh = MagicMock()
@@ -1174,7 +1174,7 @@ class AtftTest(unittest.TestCase):
 
     mock_atft._SendOperationStartEvent.assert_called_once()
     mock_atft._SendOperationSucceedEvent.assert_called_once()
-    mock_atft._CheckATFAStatus.assert_called_once()
+    mock_atft._UpdateKeysLeftInATFA.assert_called_once()
 
   def testProcessKeyFailure(self):
     self.TestProcessKeyFailureCommon(fastboot_exceptions.FastbootFailure(''))

@@ -295,21 +295,13 @@ class AtftManager(object):
     # objects.
     self._reboot_callbacks = {}
 
-  def GetATFAKeysLeft(self):
+  def GetCachedATFAKeysLeft(self):
     if not self.atfa_dev:
       return None
     return self.atfa_dev.keys_left
 
-  def CheckATFAStatus(self):
-    return self._atfa_dev_manager.CheckStatus()
-
-  def SwitchATFAStorage(self):
-    if self._fastboot_device_controller.GetHostOs() == 'Windows':
-      # Only windows need to switch. For Linux the partition should already
-      # mounted.
-      self._atfa_dev_manager.SwitchStorage()
-    else:
-      self.CheckDevice(self.atfa_dev)
+  def UpdateATFAKeysLeft(self):
+    return self._atfa_dev_manager.UpdateKeysLeft()
 
   def RebootATFA(self):
     return self._atfa_dev_manager.Reboot()
@@ -325,6 +317,12 @@ class AtftManager(object):
 
   def PurgeATFAKey(self):
     return self._atfa_dev_manager.PurgeKey()
+
+  def PrepareFile(self, file_type):
+    return self._atfa_dev_manager.PrepareFile(file_type)
+
+  def GetATFASerial(self):
+    return self._atfa_dev_manager.GetSerial()
 
   def ListDevices(self, sort_by=SORT_BY_LOCATION):
     """Get device list.
@@ -348,10 +346,6 @@ class AtftManager(object):
       device_serials: The device serial numbers.
     """
     self._UpdateSerials(device_serials)
-    if not self.stable_serials:
-      self.target_devs = []
-      self.atfa_dev = None
-      return
     self._HandleSerials()
 
   @staticmethod
@@ -579,7 +573,6 @@ class AtftManager(object):
         target_dev.provision_status = ProvisionStatus.FUSEVBOOT_SUCCESS
       target_dev.provision_state.bootloader_locked = True
 
-
   def TransferContent(self, src, dst):
     """Transfer content from a device to another device.
 
@@ -693,14 +686,6 @@ class AtftManager(object):
       os.remove(temp_file_name)
       target.Oem('fuse at-bootloader-vboot-key')
 
-      # After a success fuse, the status should be updated.
-      self.CheckProvisionStatus(target)
-      if not target.provision_state.bootloader_locked:
-        raise FastbootFailure('Status not updated.')
-
-      # # Another possible flow:
-      # target.Flash('sec', temp_file_name)
-      # os.remove(temp_file_name)
     except FastbootFailure as e:
       target.provision_status = ProvisionStatus.FUSEVBOOT_FAILED
       raise e
@@ -834,7 +819,7 @@ class AtftManager(object):
 
     return RebootCallbackFunc
 
-  def DeleteRebootingDevice(serial):
+  def DeleteRebootingDevice(self, serial):
     """Delete the rebooting target device from target device list.
 
     Args:
@@ -978,25 +963,17 @@ class AtfaDeviceManager(object):
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     return self.atft_manager.atfa_dev.GetVar('serial')
 
-  def SwitchStorage(self):
-    """Switch the ATFA device to storage mode.
-
-    Raises:
-      DeviceNotFoundException: When the device is not found
-    """
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    self.atft_manager.atfa_dev.Oem('storage')
-
   def ProcessKey(self):
     """Ask the ATFA device to process the stored key bundle.
 
     Raises:
-      DeviceNotFoundException: When the device is not found
+      DeviceNotFoundException: When the device is not found.
+      FastbootFailure: When fastboot command fails.
     """
     # Need to set time first so that certificates would validate.
+    # Set time would check atfa_dev device.
     self.SetTime()
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    self.atft_manager.atfa_dev.Oem('process-keybundle')
+    self.atft_manager.atfa_dev.Oem('keybundle')
 
   def Update(self):
     """Update the ATFA device.
@@ -1013,7 +990,8 @@ class AtfaDeviceManager(object):
     """Reboot the ATFA device.
 
     Raises:
-      DeviceNotFoundException: When the device is not found
+      DeviceNotFoundException: When the device is not found.
+      FastbootFailure: When fastboot command fails.
     """
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     self.atft_manager.atfa_dev.Oem('reboot')
@@ -1022,21 +1000,23 @@ class AtfaDeviceManager(object):
     """Shutdown the ATFA device.
 
     Raises:
-      DeviceNotFoundException: When the device is not found
+      DeviceNotFoundException: When the device is not found.
+      FastbootFailure: When fastboot command fails.
     """
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     self.atft_manager.atfa_dev.Oem('shutdown')
 
-  def CheckStatus(self):
+  def UpdateKeysLeft(self):
     """Update the number of available AT keys for the current product.
 
-    Need to use GetKeysLeft() function to get the number of keys left. If some
-    error happens, keys_left would be set to -1 to prevent checking again.
+    Need to use GetCachedATFAKeysLeft() function to get the number of keys left.
+    If some error happens, keys_left would be set to -1 to prevent checking
+    again.
 
     Raises:
-      FastbootFailure: If error happens with the fastboot oem command.
+      FastbootFailure: When fastboot command fails.
+      ProductNotSpecifiedException: When product is not specified.
     """
-
     if not self.atft_manager.product_info:
       raise ProductNotSpecifiedException()
 
@@ -1077,8 +1057,21 @@ class AtfaDeviceManager(object):
     """Inject the host time into the ATFA device.
 
     Raises:
-      DeviceNotFoundException: When the device is not found
+      DeviceNotFoundException: When the device is not found.
+      FastbootFailure: When fastboot command fails.
     """
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     self.atft_manager.atfa_dev.Oem('set-date ' + time)
+
+  def PrepareFile(self, file_type):
+    """Prepare a file for download.
+
+    Args:
+      file_type: the type of the file to prepare. Now supports 'reg'/'audit'.
+    Raises:
+      DeviceNotFoundException: When the device is not found.
+      FastbootFailure: When fastboot command fails.
+    """
+    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
+    self.atft_manager.atfa_dev.Oem(file_type)
