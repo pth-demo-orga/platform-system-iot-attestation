@@ -25,7 +25,6 @@ import json
 import math
 import os
 import sys
-import tempfile
 import threading
 
 from atftman import AtftManager
@@ -294,6 +293,23 @@ class Atft(wx.Frame):
   ID_TOOL_PROVISION = 1
   ID_TOOL_CLEAR = 2
 
+  # colors
+  COLOR_WHITE = wx.Colour(255, 255, 255)
+  COLOR_RED = wx.Colour(194, 40, 40)
+  COLOR_YELLOW = wx.Colour(218, 165, 32)
+  COLOR_GREEN = wx.Colour(68, 209, 89)
+  COLOR_BLUE = wx.Colour(43, 133, 216)
+  COLOR_GREY = wx.Colour(237, 237, 237)
+  COLOR_DARK_GREY = wx.Colour(117, 117, 117)
+  COLOR_BLACK = wx.Colour(0, 0, 0)
+  COLOR_PICK_BLUE = wx.Colour(149, 169, 235)
+
+  # How many target devices allowed.
+  TARGET_DEV_SIZE = 6
+
+  LANGUAGE_OPTIONS = ['English', '简体中文']
+  LANGUAGE_CONFIGS = ['eng', 'cn']
+
   def __init__(self):
 
     self.configs = self.ParseConfigFile()
@@ -305,8 +321,12 @@ class Atft(wx.Frame):
     # The atft_manager instance to manage various operations.
     self.atft_manager = self.CreateAtftManager()
 
-    # The target devices refresh timer object
+    # The target devices refresh timer object.
     self.refresh_timer = None
+
+    # The callback to wait for the appearance of an ATFA device for USB location
+    # mapping.
+    self.wait_atfa_callback = None
 
     # The field to sort target devices
     self.sort_by = self.atft_manager.SORT_BY_LOCATION
@@ -334,30 +354,35 @@ class Atft(wx.Frame):
 
     # To prevent low key alert to show by each provisioning.
     # We only show it once per auto provision.
-    self.low_key_alert_shown = False
+    self.first_key_alert_shown = False
+    self.second_key_alert_shown = False
 
     # Lock to make sure only one device is doing auto provisioning at one time.
     self.auto_prov_lock = threading.Lock()
 
     # Lock for showing alert box
     self.alert_lock = threading.Lock()
-    # The key threshold, if the number of attestation key in the ATFA device
-    # is lower than this number, an alert would appear.
-    self.key_threshold = self.DEFAULT_KEY_THRESHOLD
+
+    # Supervisor Mode
+    self.sup_mode = True
 
     self.InitializeUI()
+
+    self.log = self.CreateAtftLog()
+
+    # Leave supervisor mode
+    self._OnToggleSupMode(None)
 
     if self.configs == None:
       self.ShowAlert(self.ALERT_FAIL_TO_PARSE_CONFIG)
       sys.exit(0)
 
-    self.log = self.CreateAtftLog()
-
     if not self.log.log_dir_file:
       self._SendAlertEvent(self.ALERT_FAIL_TO_CREATE_LOG)
 
     self.StartRefreshingDevices()
-    self.ChooseProduct(None)
+
+    self.ShowStartScreen()
 
   def CreateAtftManager(self):
     """Create an AtftManager object.
@@ -394,6 +419,12 @@ class Atft(wx.Frame):
     self.KEY_FILE_EXTENSION = '*.atfa'
     self.UPDATE_FILE_EXTENSION = '*.upd'
 
+    # The list to store the device location for each target device slot. If the
+    # slot is not mapped, it will be None.
+    self.device_locations = []
+    for i in range(0, self.TARGET_DEV_SIZE):
+      self.device_locations.append(None)
+
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
     if not os.path.exists(config_file_path):
       return None
@@ -413,10 +444,13 @@ class Atft(wx.Frame):
       self.LOG_FILE_NUMBER = int(configs['LOG_FILE_NUMBER'])
       self.LANGUAGE = str(configs['LANGUAGE'])
       self.REBOOT_TIMEOUT = float(configs['REBOOT_TIMEOUT'])
+      self.ATFA_REBOOT_TIMEOUT = float(configs['ATFA_REBOOT_TIMEOUT'])
       self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = str(
           configs['PRODUCT_ATTRIBUTE_FILE_EXTENSION'])
       self.KEY_FILE_EXTENSION = str(configs['KEY_FILE_EXTENSION'])
       self.UPDATE_FILE_EXTENSION = str(configs['UPDATE_FILE_EXTENSION'])
+      if 'DEVICE_LOCATIONS' in configs:
+        self.device_locations = configs['DEVICE_LOCATIONS']
     except (KeyError, ValueError):
       return None
 
@@ -428,6 +462,7 @@ class Atft(wx.Frame):
     By storing the configuration back, the program would remember the
     configuration if it's opened again.
     """
+    self.configs['DEVICE_LOCATIONS'] = self.device_locations
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
     with open(config_file_path, 'w') as config_file:
       config_file.write(json.dumps(self.configs, sort_keys=True, indent=4))
@@ -464,9 +499,6 @@ class Atft(wx.Frame):
     """
     index = self.GetLanguageIndex()
 
-    self.SORT_BY_LOCATION_TEXT = ['Sort by location', '按照位置排序'][index]
-    self.SORT_BY_SERIAL_TEXT = ['Sort by serial', '按照序列号排序'][index]
-
     # Top level menus
     self.MENU_APPLICATION = ['Application', '应用'][index]
     self.MENU_KEY_PROVISIONING = ['Key Provisioning', '密钥传输'][index]
@@ -479,6 +511,7 @@ class Atft(wx.Frame):
     self.MENU_CLEAR_COMMAND = ['Clear Command Output', '清空控制台'][index]
     self.MENU_SHOW_STATUS_BAR = ['Show Statusbar', '显示状态栏'][index]
     self.MENU_CHOOSE_PRODUCT = ['Choose Product', '选择产品'][index]
+    self.MENU_APP_SETTINGS = ['App Settings', '程序设置'][index]
     self.MENU_QUIT = ['quit', '退出'][index]
 
     self.MENU_MANUAL_FUSE_VBOOT = ['Fuse Bootloader Vboot Key',
@@ -497,7 +530,6 @@ class Atft(wx.Frame):
 
     self.MENU_STOREKEY = ['Store Key Bundle', '存储密钥打包文件'][index]
     self.MENU_PURGE = ['Purge Key Bundle', '清除密钥'][index]
-    self.MENU_PROCESSKEY = ['Process Key Bundle', '处理密钥打包文件'][index]
 
     # Title
     self.TITLE = ['Google Android Things Factory Tool',
@@ -537,13 +569,19 @@ class Atft(wx.Frame):
     self.DIALOG_SELECT_DIRECTORY = ['Select directory', '选择文件夹'][index]
 
     # Buttons
-    self.BUTTON_TARGET_DEV_TOGGLE_SORT = ['target_device_sort_button',
-                                     '目标设备排序按钮'][index]
+    self.BUTTON_ENTER_SUP_MODE = ['Enter Supervisor Mode', '进入管理模式'][index]
+    self.BUTTON_LEAVE_SUP_MODE = ['Leave Supervisor Mode', '离开管理模式'][index]
 
     # Alerts
     self.ALERT_NO_ATFA = [
         'No ATFA device available!',
         '没有可用的ATFA设备！'][index]
+    self.ALERT_AUTO_PROV_NO_ATFA = [
+        'Cannot enter auto provision mode\nNo ATFA device available!',
+        '无法开启自动模式\n没有可用的ATFA设备！'][index]
+    self.ALERT_AUTO_PROV_NO_PRODUCT = [
+        'Cannot enter auto provision mode\nNo product specified!',
+        '无法开启自动模式\n没有选择产品！'][index]
     self.ALERT_PROV_NO_SELECTED = [
         "Can't Provision! No target device selected!",
         '无法传输密钥！目标设备没有选择！'][index]
@@ -635,16 +673,22 @@ class Atft(wx.Frame):
     self.ALERT_AUDIT_DOWNLOADED = [
         'Audit file downloaded at: ',
         '审计文件下载完成，位置：'][index]
+    self.ALERT_KEYS_LEFT = [
+        lambda keys_left:
+            'There are ' + str(keys_left) + ' keys left for '
+            'this product in the ATFA device.',
+        lambda keys_left:
+            'ATFA设备中对于此产品剩余密钥数量：' + str(keys_left)
+        ][index]
     self.ALERT_CONFIRM_PURGE_KEY = [
         'Are you sure you want to purge all the keys for this product?\n'
         'The keys would be purged permanently!!!',
         '你确定要清楚密钥吗？\n设备中的密钥将永久丢失！！！'][index]
 
-
   def InitializeUI(self):
     """Initialize the application UI."""
     # The frame style is default style without border.
-    style = long(wx.DEFAULT_FRAME_STYLE ^ wx.RESIZE_BORDER)
+    style = wx.DEFAULT_FRAME_STYLE & ~(wx.RESIZE_BORDER | wx.MAXIMIZE_BOX)
     wx.Frame.__init__(self, None, style=style)
 
     # Menu:
@@ -673,183 +717,24 @@ class Atft(wx.Frame):
 
     # Add Menu items to Menubar
     self.menubar = wx.MenuBar()
-    self.app_menu = wx.Menu()
-    self.menubar.Append(self.app_menu, self.MENU_APPLICATION)
-    self.provision_menu = wx.Menu()
-    self.menubar.Append(self.provision_menu, self.MENU_KEY_PROVISIONING)
-    self.atfa_menu = wx.Menu()
-    self.menubar.Append(self.atfa_menu, self.MENU_ATFA_DEVICE)
-    self.audit_menu = wx.Menu()
-    self.menubar.Append(self.audit_menu, self.MENU_AUDIT)
-    self.key_menu = wx.Menu()
-    self.menubar.Append(self.key_menu, self.MENU_KEY_MANAGEMENT)
-
-    # App Menu Options
-    menu_clear_command = self.app_menu.Append(
-        wx.ID_ANY, self.MENU_CLEAR_COMMAND)
-
-    self.Bind(wx.EVT_MENU, self.OnClearCommandWindow, menu_clear_command)
-
-    self.menu_show_status_bar = self.app_menu.Append(
-        wx.ID_ANY, self.MENU_SHOW_STATUS_BAR, kind=wx.ITEM_CHECK)
-    self.app_menu.Check(self.menu_show_status_bar.GetId(), True)
-    self.Bind(wx.EVT_MENU, self.ToggleStatusBar, self.menu_show_status_bar)
-
-    self.menu_choose_product = self.app_menu.Append(
-        wx.ID_ANY, self.MENU_CHOOSE_PRODUCT)
-    self.Bind(wx.EVT_MENU, self.ChooseProduct, self.menu_choose_product)
-
-    menu_quit = self.app_menu.Append(wx.ID_EXIT, self.MENU_QUIT)
-    self.Bind(wx.EVT_MENU, self.OnQuit, menu_quit)
-
-    # Key Provision Menu Options
-    menu_manual_fuse_vboot = self.provision_menu.Append(
-        wx.ID_ANY, self.MENU_MANUAL_FUSE_VBOOT)
-    self.Bind(wx.EVT_MENU, self.OnFuseVbootKey, menu_manual_fuse_vboot)
-    menu_manual_fuse_attr = self.provision_menu.Append(
-        wx.ID_ANY, self.MENU_MANUAL_FUSE_ATTR)
-    self.Bind(wx.EVT_MENU, self.OnFusePermAttr, menu_manual_fuse_attr)
-    menu_manual_lock_avb = self.provision_menu.Append(
-        wx.ID_ANY, self.MENU_MANUAL_LOCK_AVB)
-    self.Bind(wx.EVT_MENU, self.OnLockAvb, menu_manual_lock_avb)
-    menu_manual_prov = self.provision_menu.Append(
-        wx.ID_ANY, self.MENU_MANUAL_PROV)
-    self.Bind(wx.EVT_MENU, self.OnManualProvision, menu_manual_prov)
-
-    # Audit Menu Options
-    menu_download_audit = self.audit_menu.Append(
-        wx.ID_ANY, self.MENU_DOWNLOAD_AUDIT)
-    self.Bind(wx.EVT_MENU, self.OnGetAuditFile, menu_download_audit)
-
-    # ATFA Menu Options
-    menu_atfa_status = self.atfa_menu.Append(wx.ID_ANY, self.MENU_ATFA_STATUS)
-    self.Bind(wx.EVT_MENU, self.OnCheckATFAStatus, menu_atfa_status)
-
-    menu_reg_file = self.atfa_menu.Append(wx.ID_ANY, self.MENU_REG_FILE)
-    self.Bind(wx.EVT_MENU, self.OnGetRegFile, menu_reg_file)
-
-    menu_update = self.atfa_menu.Append(wx.ID_ANY, self.MENU_ATFA_UPDATE)
-    self.Bind(wx.EVT_MENU, self.OnUpdateAtfa, menu_update)
-
-    menu_reboot = self.atfa_menu.Append(wx.ID_ANY, self.MENU_REBOOT)
-    self.Bind(wx.EVT_MENU, self.OnReboot, menu_reboot)
-
-    menu_shutdown = self.atfa_menu.Append(wx.ID_ANY, self.MENU_SHUTDOWN)
-    self.Bind(wx.EVT_MENU, self.OnShutdown, menu_shutdown)
-
-    # Key Management Menu Options
-    menu_storekey = self.key_menu.Append(wx.ID_ANY, self.MENU_STOREKEY)
-    self.Bind(wx.EVT_MENU, self.OnStoreKey, menu_storekey)
-
-    menu_purgekey = self.key_menu.Append(wx.ID_ANY, self.MENU_PURGE)
-    self.Bind(wx.EVT_MENU, self.OnPurgeKey, menu_purgekey)
-
+    self._CreateAppMenu()
+    self._CreateProvisionMenu()
+    self._CreateATFAMenu()
+    self._CreateAuditMenu()
+    self._CreateKeyMenu()
     self.SetMenuBar(self.menubar)
 
     # The main panel
-    self.panel = wx.Panel(self)
-    self.vbox = wx.BoxSizer(wx.VERTICAL)
-    self.st = wx.StaticLine(self.panel, wx.ID_ANY, style=wx.LI_HORIZONTAL)
-    self.vbox.Add(self.st, 0, wx.ALL | wx.EXPAND, 5)
+    self.panel = wx.Window(self)
+    self.main_box = wx.BoxSizer(wx.VERTICAL)
+    self._CreateHeaderPanel()
+    self._CreateTargetDevsPanel()
+    self._CreateCommandOutputPanel()
+    self._CreateStatusBar()
 
-    # Product Name Display
-    self.product_name_title = wx.StaticText(
-        self.panel, wx.ID_ANY, self.TITLE_PRODUCT_NAME)
-    self.product_name_display = wx.StaticText(
-        self.panel, wx.ID_ANY, self.TITLE_PRODUCT_NAME_NOTCHOSEN)
-    self.bold_font = wx.Font(10, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_BOLD)
-    self.product_name_display.SetFont(self.bold_font)
-    self.product_name_sizer = wx.BoxSizer(wx.HORIZONTAL)
-    self.product_name_sizer.Add(self.product_name_title)
-    self.product_name_sizer.Add(self.product_name_display, 0, wx.LEFT, 2)
-    self.vbox.Add(self.product_name_sizer, 0, wx.ALL, 5)
-
-    # Keys Left Display
-    self.keys_left_title = wx.StaticText(
-        self.panel, wx.ID_ANY, self.TITLE_KEYS_LEFT)
-    self.keys_left_display = wx.StaticText(
-        self.panel, wx.ID_ANY, '')
-    self.keys_left_display.SetFont(self.bold_font)
-    self.keys_left_sizer = wx.BoxSizer(wx.HORIZONTAL)
-    self.keys_left_sizer.Add(self.keys_left_title)
-    self.keys_left_sizer.Add(self.keys_left_display, 0, wx.LEFT, 2)
-    self.vbox.Add(self.keys_left_sizer, 0, wx.ALL, 5)
-
-    # Device Output Title
-    self.atfa_dev_title = wx.StaticText(
-        self.panel, wx.ID_ANY, self.TITLE_ATFA_DEV)
-    self.atfa_dev_title_sizer = wx.BoxSizer(wx.HORIZONTAL)
-    self.atfa_dev_title_sizer.Add(self.atfa_dev_title, 0, wx.ALL, 5)
-    self.vbox.Add(self.atfa_dev_title_sizer, 0, wx.LEFT)
-
-    # Device Output Window
-    self.atfa_devs_output = wx.TextCtrl(
-        self.panel,
-        wx.ID_ANY,
-        size=(800, 20),
-        style=wx.TE_MULTILINE | wx.TE_READONLY)
-    self.vbox.Add(self.atfa_devs_output, 0, wx.ALL | wx.EXPAND, 5)
-
-    # Device Output Title
-    self.target_dev_title = wx.StaticText(self.panel, wx.ID_ANY,
-                                          self.TITLE_TARGET_DEV)
-    self.target_dev_title_sizer = wx.BoxSizer(wx.HORIZONTAL)
-    self.target_dev_title_sizer.Add(self.target_dev_title, 0, wx.ALL, 5)
-
-    # Device Output Sort Button
-    self.target_dev_toggle_sort = wx.Button(
-        self.panel,
-        wx.ID_ANY,
-        self.SORT_BY_SERIAL_TEXT,
-        style=wx.BU_LEFT,
-        name=self.BUTTON_TARGET_DEV_TOGGLE_SORT,
-        size=wx.Size(110, 30))
-    self.target_dev_title_sizer.Add(self.target_dev_toggle_sort, 0, wx.LEFT, 10)
-    self.Bind(wx.EVT_BUTTON, self.OnToggleTargetSort,
-              self.target_dev_toggle_sort)
-
-    self.vbox.Add(self.target_dev_title_sizer, 0, wx.LEFT)
-
-    # Device Output Window
-    self.target_devs_output = wx.ListCtrl(
-        self.panel, wx.ID_ANY, size=(800, 200), style=wx.LC_REPORT)
-    self.target_devs_output.InsertColumn(
-        0, self.FIELD_SERIAL_NUMBER, width=self.FIELD_SERIAL_WIDTH)
-    self.target_devs_output.InsertColumn(
-        1, self.FIELD_USB_LOCATION, width=self.FIELD_USB_WIDTH)
-    self.target_devs_output.InsertColumn(
-        2, self.FIELD_STATUS, width=self.FIELD_STATUS_WIDTH)
-    self.vbox.Add(self.target_devs_output, 0, wx.ALL | wx.EXPAND, 5)
-
-    # Command Output Title
-    self.command_title = wx.StaticText(
-        self.panel, wx.ID_ANY, self.TITLE_COMMAND_OUTPUT)
-    self.command_title_sizer = wx.BoxSizer(wx.HORIZONTAL)
-    self.command_title_sizer.Add(self.command_title, 0, wx.ALL, 5)
-    self.vbox.Add(self.command_title_sizer, 0, wx.LEFT)
-
-    # Command Output Window
-    self.cmd_output = wx.TextCtrl(
-        self.panel,
-        wx.ID_ANY,
-        size=(800, 190),
-        style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL)
-    self.vbox.Add(self.cmd_output, 0, wx.ALL | wx.EXPAND, 5)
-
-    self.panel.SetSizer(self.vbox)
-    self.statusbar = self.CreateStatusBar()
-    self.statusbar.SetStatusText('Ready')
-    self.SetSize((800, 720))
     self.SetTitle(self.TITLE)
-    self.Center()
+    self.panel.SetSizerAndFit(self.main_box)
     self.Show(True)
-
-    # Change Key Threshold Dialog
-    self.change_threshold_dialog = wx.TextEntryDialog(
-        self,
-        self.DIALOG_CHANGE_THRESHOLD_TEXT,
-        self.DIALOG_CHANGE_THRESHOLD_TITLE,
-        style=wx.TextEntryDialogStyle | wx.CENTRE)
 
     # Low Key Alert Dialog
     self.low_key_dialog = wx.MessageDialog(
@@ -866,6 +751,461 @@ class Atft(wx.Frame):
         style=wx.OK | wx.ICON_EXCLAMATION | wx.CENTRE)
 
     self._CreateBindEvents()
+
+  def _CreateAppMenu(self):
+    """Create the app menu items."""
+    app_menu = wx.Menu()
+    self.menubar.Append(app_menu, self.MENU_APPLICATION)
+    # App Menu Options
+    menu_app_settings = app_menu.Append(
+        wx.ID_ANY, self.MENU_APP_SETTINGS)
+    self.Bind(wx.EVT_MENU, self.ChangeSettings, menu_app_settings)
+
+    menu_choose_product = app_menu.Append(
+        wx.ID_ANY, self.MENU_CHOOSE_PRODUCT)
+    self.Bind(wx.EVT_MENU, self.ChooseProduct, menu_choose_product)
+
+    menu_key_threshold = app_menu.Append(
+        wx.ID_ANY, self.MENU_KEY_THRESHOLD)
+    self.Bind(wx.EVT_MENU, self.OnChangeKeyThreshold, menu_key_threshold)
+
+    menu_clear_command = app_menu.Append(
+        wx.ID_ANY, self.MENU_CLEAR_COMMAND)
+
+    self.Bind(wx.EVT_MENU, self.OnClearCommandWindow, menu_clear_command)
+
+    self.menu_show_status_bar = app_menu.Append(
+        wx.ID_ANY, self.MENU_SHOW_STATUS_BAR, kind=wx.ITEM_CHECK)
+    app_menu.Check(self.menu_show_status_bar.GetId(), True)
+    self.Bind(wx.EVT_MENU, self.ToggleStatusBar, self.menu_show_status_bar)
+
+    menu_quit = app_menu.Append(wx.ID_EXIT, self.MENU_QUIT)
+    self.Bind(wx.EVT_MENU, self.OnQuit, menu_quit)
+    self.app_menu = app_menu
+
+  def _CreateProvisionMenu(self):
+    """Create the provision menu items."""
+    provision_menu = wx.Menu()
+    self.menubar.Append(provision_menu, self.MENU_KEY_PROVISIONING)
+    # Key Provision Menu Options
+    menu_manual_fuse_vboot = provision_menu.Append(
+        wx.ID_ANY, self.MENU_MANUAL_FUSE_VBOOT)
+    self.Bind(wx.EVT_MENU, self.OnFuseVbootKey, menu_manual_fuse_vboot)
+
+    menu_manual_fuse_attr = provision_menu.Append(
+        wx.ID_ANY, self.MENU_MANUAL_FUSE_ATTR)
+    self.Bind(wx.EVT_MENU, self.OnFusePermAttr, menu_manual_fuse_attr)
+
+    menu_manual_lock_avb = provision_menu.Append(
+        wx.ID_ANY, self.MENU_MANUAL_LOCK_AVB)
+    self.Bind(wx.EVT_MENU, self.OnLockAvb, menu_manual_lock_avb)
+
+    menu_manual_prov = provision_menu.Append(
+        wx.ID_ANY, self.MENU_MANUAL_PROV)
+    self.Bind(wx.EVT_MENU, self.OnManualProvision, menu_manual_prov)
+
+    self.provision_menu = provision_menu
+
+  def _CreateATFAMenu(self):
+    """Create the ATFA menu items."""
+    atfa_menu = wx.Menu()
+    self.menubar.Append(atfa_menu, self.MENU_ATFA_DEVICE)
+    # ATFA Menu Options
+    menu_atfa_status = atfa_menu.Append(wx.ID_ANY, self.MENU_ATFA_STATUS)
+    self.Bind(wx.EVT_MENU, self.OnCheckATFAStatus, menu_atfa_status)
+
+    menu_reg_file = atfa_menu.Append(wx.ID_ANY, self.MENU_REG_FILE)
+    self.Bind(wx.EVT_MENU, self.OnGetRegFile, menu_reg_file)
+
+    menu_update = atfa_menu.Append(wx.ID_ANY, self.MENU_ATFA_UPDATE)
+    self.Bind(wx.EVT_MENU, self.OnUpdateAtfa, menu_update)
+
+    menu_reboot = atfa_menu.Append(wx.ID_ANY, self.MENU_REBOOT)
+    self.Bind(wx.EVT_MENU, self.OnReboot, menu_reboot)
+
+    menu_shutdown = atfa_menu.Append(wx.ID_ANY, self.MENU_SHUTDOWN)
+    self.Bind(wx.EVT_MENU, self.OnShutdown, menu_shutdown)
+
+    self.atfa_menu = atfa_menu
+
+  def _CreateAuditMenu(self):
+    """Create the audit menu items."""
+    audit_menu = wx.Menu()
+    self.menubar.Append(audit_menu, self.MENU_AUDIT)
+    # Audit Menu Options
+    menu_download_audit = audit_menu.Append(
+        wx.ID_ANY, self.MENU_DOWNLOAD_AUDIT)
+    self.Bind(wx.EVT_MENU, self.OnGetAuditFile, menu_download_audit)
+
+    self.audit_menu = audit_menu
+
+  def _CreateKeyMenu(self):
+    """Create the key menu items."""
+    key_menu = wx.Menu()
+    self.menubar.Append(key_menu, self.MENU_KEY_MANAGEMENT)
+    # Key Management Menu Options
+    menu_storekey = key_menu.Append(wx.ID_ANY, self.MENU_STOREKEY)
+    self.Bind(wx.EVT_MENU, self.OnStoreKey, menu_storekey)
+
+    menu_purgekey = key_menu.Append(wx.ID_ANY, self.MENU_PURGE)
+    self.Bind(wx.EVT_MENU, self.OnPurgeKey, menu_purgekey)
+
+    self.key_menu = key_menu
+
+  def _CreateHeaderPanel(self):
+    """Create the header panel.
+
+    The header panel contains the supervisor button, product information and
+    ATFA device information.
+    """
+    header_panel = wx.Window(self.panel)
+    header_panel.SetForegroundColour(self.COLOR_BLACK)
+    header_panel_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    header_panel_left_sizer = wx.BoxSizer(wx.VERTICAL)
+    header_panel_right_sizer = wx.BoxSizer(wx.VERTICAL)
+    header_panel_sizer.Add(header_panel_left_sizer, 0)
+    header_panel_sizer.Add(
+        header_panel_right_sizer, 1, wx.RIGHT, 10)
+
+    self.button_supervisor = wx.Button(
+        header_panel, wx.ID_ANY, style=wx.BORDER_NONE, label='...',
+        name='Toggle Supervisor Mode', size=(40, 40))
+    button_supervisor_font = wx.Font(
+        20, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    self.button_supervisor.SetFont(button_supervisor_font)
+    self.button_supervisor.SetForegroundColour(self.COLOR_BLACK)
+    header_panel_right_sizer.Add(self.button_supervisor, 0, wx.ALIGN_RIGHT)
+    self.button_supervisor_toggle = wx.Button(
+        header_panel, wx.ID_ANY, style=wx.BU_LEFT,
+        label=self.BUTTON_LEAVE_SUP_MODE, name=self.BUTTON_LEAVE_SUP_MODE,
+        size=(200, 30))
+    button_supervisor_font = wx.Font(
+        10, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    self.button_supervisor_toggle.SetFont(button_supervisor_font)
+    self.button_supervisor_toggle.SetForegroundColour(self.COLOR_BLACK)
+    self.button_supervisor_toggle.Hide()
+    header_panel_right_sizer.Add(
+        self.button_supervisor_toggle, 0, wx.ALIGN_RIGHT)
+    self.header_panel_right_sizer = header_panel_right_sizer
+
+    self.Bind(wx.EVT_BUTTON, self._OnToggleSupButton, self.button_supervisor)
+    self.Bind(
+        wx.EVT_BUTTON, self._OnToggleSupMode, self.button_supervisor_toggle)
+
+    # Product Name Display
+    product_name_title = wx.StaticText(
+        header_panel, wx.ID_ANY, self.TITLE_PRODUCT_NAME)
+    self.product_name_display = wx.StaticText(
+        header_panel, wx.ID_ANY, self.TITLE_PRODUCT_NAME_NOTCHOSEN)
+    product_name_font = wx.Font(16, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    product_name_title.SetFont(product_name_font)
+    self.product_name_display.SetFont(product_name_font)
+    product_name_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    product_name_sizer.Add(product_name_title)
+    product_name_sizer.Add(self.product_name_display, 0, wx.LEFT, 2)
+    header_panel_left_sizer.Add(product_name_sizer, 0, wx.ALL, 5)
+
+    self.main_box.Add(header_panel, 0, wx.EXPAND)
+
+    # Device Output Title
+    atfa_dev_title = wx.StaticText(header_panel, wx.ID_ANY, self.TITLE_ATFA_DEV)
+    self.atfa_dev_output = wx.StaticText(header_panel, wx.ID_ANY, '')
+    atfa_dev_title_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    atfa_dev_title_sizer.Add(atfa_dev_title)
+    atfa_dev_title_sizer.Add(self.atfa_dev_output)
+    header_panel_left_sizer.Add(atfa_dev_title_sizer, 0, wx.LEFT | wx.BOTTOM, 5)
+
+    header_panel.SetSizerAndFit(header_panel_sizer)
+
+  def _CreateTargetDevsPanel(self):
+    """Create the target device panel to list target devices."""
+    # Device Output Title
+    target_devs_panel = wx.Window(self.panel, style=wx.BORDER_NONE)
+    target_devs_panel_sizer = wx.BoxSizer(wx.VERTICAL)
+
+    self.target_devs_title = wx.StaticText(
+        target_devs_panel, wx.ID_ANY, self.TITLE_TARGET_DEV)
+    target_dev_font = wx.Font(
+        16, wx.FONTFAMILY_MODERN, wx.NORMAL, wx.FONTWEIGHT_BOLD)
+    self.target_devs_title.SetFont(target_dev_font)
+    self.target_devs_title_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    self.target_devs_title_sizer.Add(self.target_devs_title, 0, wx.LEFT, 10)
+
+    target_devs_panel_sizer.Add(
+        self.target_devs_title_sizer, 0, wx.TOP | wx.BOTTOM, 10)
+
+    self.target_devs_components = self.CreateTargetDeviceList(
+        target_devs_panel, target_devs_panel_sizer)
+
+    target_devs_panel.SetSizerAndFit(target_devs_panel_sizer)
+    target_devs_panel.SetBackgroundColour(self.COLOR_WHITE)
+
+    self.main_box.Add(target_devs_panel, 0, wx.EXPAND)
+
+  def _CreateCommandOutputPanel(self):
+    """Create command output panel to show command outputs."""
+    # Command Output Title
+    self.cmd_output_wrap = wx.Window(self.panel)
+    cmd_output_wrap_sizer = wx.BoxSizer(wx.VERTICAL)
+
+    static_line = wx.StaticLine(self.cmd_output_wrap)
+    static_line.SetForegroundColour(self.COLOR_BLACK)
+    cmd_output_wrap_sizer.Add(static_line, 0, wx.EXPAND)
+
+    command_title_panel = wx.Window(self.cmd_output_wrap)
+    command_title_sizer = wx.BoxSizer(wx.VERTICAL)
+    command_title = wx.StaticText(
+        command_title_panel, wx.ID_ANY, self.TITLE_COMMAND_OUTPUT)
+    command_title.SetForegroundColour(self.COLOR_BLACK)
+    command_title_font = wx.Font(
+        16, wx.FONTFAMILY_MODERN, wx.NORMAL, wx.FONTWEIGHT_BOLD)
+    command_title.SetFont(command_title_font)
+    command_title_sizer.Add(command_title, 0, wx.ALL, 5)
+    command_title_panel.SetSizerAndFit(command_title_sizer)
+    command_title_panel.SetBackgroundColour(self.COLOR_WHITE)
+    cmd_output_wrap_sizer.Add(
+        command_title_panel, 0, wx.EXPAND)
+    self.cmd_output_wrap_sizer = cmd_output_wrap_sizer
+
+    # Command Output Window
+    cmd_output_panel = wx.Window(self.cmd_output_wrap)
+    self.cmd_output = wx.TextCtrl(
+        cmd_output_panel,
+        wx.ID_ANY,
+        size=(0, 110),
+        style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL | wx.BORDER_NONE)
+    cmd_output_sizer = wx.BoxSizer(wx.VERTICAL)
+    cmd_output_sizer.Add(
+        self.cmd_output, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+    cmd_output_panel.SetSizerAndFit(cmd_output_sizer)
+    cmd_output_panel.SetBackgroundColour(self.COLOR_WHITE)
+
+    cmd_output_wrap_sizer.Add(cmd_output_panel, 0, wx.ALL | wx.EXPAND, 0)
+    self.cmd_output_wrap.SetSizerAndFit(cmd_output_wrap_sizer)
+
+    self.main_box.Add(self.cmd_output_wrap, 0, wx.EXPAND, 0)
+
+  def _CreateStatusBar(self):
+    """Create the bottom status bar."""
+    self.statusbar = self.CreateStatusBar(1, style=wx.STB_DEFAULT_STYLE)
+    self.statusbar.SetBackgroundColour(self.COLOR_BLACK)
+    self.statusbar.SetForegroundColour(self.COLOR_WHITE)
+    self.statusbar.SetStatusText(self.TITLE_KEYS_LEFT)
+    statusbar_font = wx.Font(
+        10, wx.FONTFAMILY_MODERN, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    self.statusbar.SetFont(statusbar_font)
+    self.statusbar.SetSize(0, 35)
+    # Add the spacer for statusbar
+    self.main_box.AddSpacer(40)
+
+  def ShowStartScreen(self):
+    """Show the start screen which contains start logo.
+
+    We also ask user to choose product file at the start screen
+    """
+    self.start_screen_shown = True
+    self.panel.Hide()
+    self.statusbar.Hide()
+    self.SetMenuBar(None)
+    self.start_screen = wx.Window(self, size=(960, 600))
+    self.start_screen.SetBackgroundColour(self.COLOR_BLACK)
+    start_screen_sizer = wx.BoxSizer(wx.VERTICAL)
+    self.start_screen.SetSizer(start_screen_sizer)
+    start_screen_sizer.AddSpacer(120)
+    athings_logo_img = wx.Image('athings_icon.png', type=wx.BITMAP_TYPE_PNG)
+    athings_logo = wx.Bitmap(athings_logo_img)
+    logo_img = wx.StaticBitmap(self.start_screen, bitmap=athings_logo)
+    start_screen_sizer.Add(logo_img, 0, wx.ALIGN_CENTER)
+    start_screen_sizer.AddSpacer(30)
+    athings_text_image = wx.Image('androidthings.png', type=wx.BITMAP_TYPE_PNG)
+    athings_text = wx.Bitmap(athings_text_image)
+    athings_img = wx.StaticBitmap(self.start_screen, bitmap=athings_text)
+    start_screen_sizer.Add(athings_img, 0, wx.ALIGN_CENTER)
+    start_screen_sizer.AddSpacer(50)
+
+    button_choose_product = wx.Button(
+        self.start_screen, label=self.MENU_CHOOSE_PRODUCT, size=(250, 50))
+    font = wx.Font(16, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    button_choose_product.SetFont(font)
+    button_choose_product.SetBackgroundColour(self.COLOR_DARK_GREY)
+    button_choose_product.SetForegroundColour(self.COLOR_WHITE)
+
+    start_screen_sizer.Add(button_choose_product, 0, wx.ALIGN_CENTER)
+    button_choose_product.Bind(wx.EVT_BUTTON, self.ChooseProduct)
+    self.start_screen.Layout()
+    self.SetSize(self.start_screen.GetSize())
+    self.CenterOnParent()
+
+  def HideStartScreen(self):
+    """Hide the start screen."""
+    self.start_screen_shown = False
+    self.start_screen.Hide()
+    self.panel.Show()
+    self.statusbar.Show()
+    if self.sup_mode:
+      self.SetMenuBar(self.menubar)
+    self.main_box.Layout()
+    self.panel.SetSizerAndFit(self.main_box)
+    self.Layout()
+    self.SetSize(self.GetWindowSize())
+
+  def GetWindowSize(self):
+    """Get the current main window size."""
+    size_x = self.panel.GetSize()[0]
+    size_y = 0
+    if self.menubar.IsShown():
+      size_y += self.menubar.GetSize()[1]
+    size_y += self.panel.GetSize()[1]
+    if self.statusbar.IsShown():
+      size_y += self.statusbar.GetSize()[1]
+    return (size_x, size_y)
+
+  def CreateTargetDeviceList(self, parent, parent_sizer, map_location=False):
+    """Create the grid style panel to display target device information.
+
+    Args:
+      parent: The parent window.
+      parent_sizer: The parent sizer.
+      map_location: Whether the target list is for USB location mapping.
+    Returns:
+      A list of DevComponent object that contains necessary information and UI
+        element about each target device.
+    """
+    # target device output components
+    target_devs_components = []
+
+    # The scale of the display size. We need a smaller version of the target
+    # device list for the settings page, so we can use this scale factor to
+    # scale the panel's size.
+    scale = 1
+
+    if map_location:
+      scale = 0.9
+
+    # Device Output Window
+    devices_list = wx.GridSizer(2, 3, 40 * scale, 0)
+    parent_sizer.Add(devices_list, flag=wx.BOTTOM, border=20)
+
+    class DevComponent(object):
+      # The index for this component.
+      index = -1
+      # The main target device panel that displays the information.
+      panel = None
+      # The serial number
+      serial_number = None
+      # The serial number text field.
+      serial_text = None
+      # The status text field.
+      status = None
+      # The field wrapping the status text field. This should be used to change
+      # the background color.
+      status_background = None
+      # The sizer to align status text field. Need to use
+      # status_wrapper.Layout() in order to align status text correctly after
+      # every status change.
+      status_wrapper = None
+      # The field wrapping the title text field. This should be used to change
+      # background color if the device is selected.
+      title_background = None
+      # Whether this device slot is selected.
+      selected = False
+      # Whether this device slot is in use.
+      active = False
+
+      def __init__(self, index):
+        self.index = index
+
+    for i in range(0, self.TARGET_DEV_SIZE):
+      dev_component = DevComponent(i)
+      # Create each target device panel.
+      target_devs_output_panel = wx.Window(parent, style=wx.BORDER_RAISED)
+      target_devs_output_panel_sizer = wx.BoxSizer(wx.VERTICAL)
+      dev_component.panel = target_devs_output_panel
+
+      # Create the title panel.
+      target_devs_output_title = wx.Window(
+          target_devs_output_panel, style=wx.BORDER_NONE,
+          size=(270 * scale, 50 * scale))
+      target_devs_output_title.SetBackgroundColour(self.COLOR_WHITE)
+      # Don't accept user input, otherwise user input would change the style.
+      target_devs_output_title_sizer = wx.BoxSizer(wx.HORIZONTAL)
+      target_devs_output_title.SetSizer(target_devs_output_title_sizer)
+      dev_component.title_background = target_devs_output_title
+
+      # The number in the title bar.
+      target_devs_output_number = wx.StaticText(
+          target_devs_output_title, wx.ID_ANY, str(i + 1).zfill(2))
+      target_devs_output_title_sizer.Add(
+          target_devs_output_number, 0, wx.ALL, 10)
+      number_font = wx.Font(
+          18, wx.FONTFAMILY_SWISS, wx.NORMAL, wx.FONTWEIGHT_BOLD)
+      target_devs_output_number.SetForegroundColour(self.COLOR_DARK_GREY)
+      target_devs_output_number.SetFont(number_font)
+
+      # The serial number in the title bar.
+      target_devs_output_serial = wx.StaticText(
+          target_devs_output_title, wx.ID_ANY, '')
+      target_devs_output_serial.SetForegroundColour(self.COLOR_BLACK)
+      target_devs_output_serial.SetMinSize((180 * scale, 0))
+      target_devs_output_title_sizer.Add(
+          target_devs_output_serial, 0, wx.TOP, 18)
+      serial_font = wx.Font(
+          9, wx.FONTFAMILY_MODERN, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+      target_devs_output_serial.SetFont(serial_font)
+      dev_component.serial_text = target_devs_output_serial
+
+      # The selected icon in the title bar
+      selected_image = wx.Image('selected.png', type=wx.BITMAP_TYPE_PNG)
+      selected_bitmap = wx.Bitmap(selected_image)
+      selected_icon = wx.StaticBitmap(
+          target_devs_output_title, bitmap=selected_bitmap)
+      target_devs_output_title_sizer.Add(selected_icon, 0, wx.TOP, 12 * scale)
+
+      # The device status panel.
+      target_devs_output_status = wx.Window(
+          target_devs_output_panel, style=wx.BORDER_NONE,
+          size=(270 * scale, 110 * scale))
+      target_devs_output_status.SetBackgroundColour(self.COLOR_GREY)
+      target_devs_output_status_sizer = wx.BoxSizer(wx.HORIZONTAL)
+      target_devs_output_status.SetSizer(target_devs_output_status_sizer)
+      dev_component.status_background = target_devs_output_status
+
+      # The device status string.
+      device_status_string = ''
+      target_devs_output_status_info = wx.StaticText(
+          target_devs_output_status, wx.ID_ANY, device_status_string)
+      font_size = 18
+      if map_location:
+        font_size = 20
+      status_font = wx.Font(
+          font_size, wx.FONTFAMILY_MODERN, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+      target_devs_output_status_info.SetForegroundColour(self.COLOR_BLACK)
+      target_devs_output_status_info.SetFont(status_font)
+      dev_component.status = target_devs_output_status_info
+
+      # We need two sizers, one for vertical alignment and one for horizontal.
+      target_devs_output_status_ver_sizer = wx.BoxSizer(wx.VERTICAL)
+      target_devs_output_status_ver_sizer.Add(
+          target_devs_output_status_info, 1, wx.ALIGN_CENTER)
+      target_devs_output_status_sizer.Add(
+          target_devs_output_status_ver_sizer, 1, wx.ALIGN_CENTER)
+      dev_component.status_wrapper = target_devs_output_status_ver_sizer
+
+      target_devs_output_panel_sizer.Add(target_devs_output_title, 0, wx.EXPAND)
+      target_devs_output_panel_sizer.Add(
+          target_devs_output_status, 0, wx.EXPAND)
+      target_devs_output_panel.SetSizer(target_devs_output_panel_sizer)
+
+      # This sizer is only to add 15px right border
+      target_devs_output_panel_sizer_wrap = wx.BoxSizer(wx.HORIZONTAL)
+      target_devs_output_panel_sizer_wrap.Add(target_devs_output_panel)
+      target_devs_output_panel_sizer_wrap.AddSpacer(15 * scale)
+
+      devices_list.Add(
+          target_devs_output_panel_sizer_wrap, 0, wx.LEFT | wx.RIGHT, 10)
+      target_devs_components.append(dev_component)
+
+    return target_devs_components
 
   def PauseRefresh(self):
     """Pause the refresh for device list during fastboot operations.
@@ -959,6 +1299,11 @@ class Atft(wx.Frame):
     Args:
       event: The triggering event.
     """
+    try:
+      self.atft_manager.CheckDevice(self.atft_manager.atfa_dev)
+    except DeviceNotFoundException:
+      self._SendAlertEvent(self.ALERT_NO_ATFA)
+      return
     self._CreateThread(self._Reboot)
 
   def OnShutdown(self, event):
@@ -967,29 +1312,93 @@ class Atft(wx.Frame):
     Args:
       event: The triggering event.
     """
+    try:
+      self.atft_manager.CheckDevice(self.atft_manager.atfa_dev)
+    except DeviceNotFoundException:
+      self._SendAlertEvent(self.ALERT_NO_ATFA)
+      return
     self._CreateThread(self._Shutdown)
 
-  def OnToggleTargetSort(self, event):
-    """Switch the target device list sorting field.
+  def OnEnterAutoProv(self):
+    """Enter auto provisioning mode."""
+    if self.auto_prov:
+      return
+    if (self.atft_manager.atfa_dev and self.atft_manager.product_info and
+        self.atft_manager.GetATFAKeysLeft() > 0):
+      # If product info file is chosen and atfa device is present and there are
+      # keys left. Enter auto provisioning mode.
+      self.auto_prov = True
+      self.first_key_alert_shown = False
+      self.second_key_alert_shown = False
+      message = 'Automatic key provisioning start'
+      self.PrintToCommandWindow(message)
+      self.log.Info('Autoprov', message)
+
+  def OnLeaveAutoProv(self):
+    """Leave auto provisioning mode."""
+    if not self.auto_prov:
+      return
+    self.auto_prov = False
+    for device in self.atft_manager.target_devs:
+      # Change all waiting devices' status to it's original state.
+      if device.provision_status == ProvisionStatus.WAITING:
+        self.atft_manager.CheckProvisionStatus(device)
+    message = 'Automatic key provisioning end'
+    self.PrintToCommandWindow(message)
+    self.log.Info('Autoprov', message)
+
+  def _OnToggleSupButton(self, event):
+    """Show/Hide 'Enter Supervisor Mode' button.
 
     Args:
       event: The triggering event.
     """
-    if self.sort_by == self.atft_manager.SORT_BY_LOCATION:
-      self.sort_by = self.atft_manager.SORT_BY_SERIAL
-      self.target_dev_toggle_sort.SetLabel(self.SORT_BY_LOCATION_TEXT)
+    if self.button_supervisor_toggle.IsShown():
+      self.button_supervisor_toggle.Show(False)
     else:
-      self.sort_by = self.atft_manager.SORT_BY_LOCATION
-      self.target_dev_toggle_sort.SetLabel(self.SORT_BY_SERIAL_TEXT)
-    self._ListDevices()
+      self.button_supervisor_toggle.SetPosition((630,20))
+      self.button_supervisor_toggle.Show(True)
+      self.button_supervisor_toggle.Layout()
+      self.button_supervisor_toggle.SetSize(250, 30)
+      self.button_supervisor_toggle.Raise()
 
-  def OnToggleAutoProv(self, event):
-    """Enter/Leave auto provisioning mode.
+  def _OnToggleSupMode(self, event):
+    """Enter/leave supervisor mode.
 
     Args:
       event: The triggering event.
     """
-    pass
+    if self.sup_mode:
+     self.OnLeaveSupMode()
+    else:
+      self.OnEnterSupMode()
+    self.button_supervisor_toggle.Show(False)
+    self.main_box.Layout()
+    self.panel.SetSizerAndFit(self.main_box)
+    self.Layout()
+    self.SetSize(self.GetWindowSize())
+
+  def OnLeaveSupMode(self):
+    """Leave supervisor mode"""
+    message = 'Leave supervisor mode'
+    self.PrintToCommandWindow(message)
+    self.log.Info('Supmode', message)
+    self.sup_mode = False
+    self.button_supervisor_toggle.SetLabel(self.BUTTON_ENTER_SUP_MODE)
+    self.main_box.Hide(self.cmd_output_wrap)
+    self.SetMenuBar(None)
+    self.OnEnterAutoProv()
+
+  def OnEnterSupMode(self):
+    """Enter supervisor mode, ask for credential."""
+    message = 'Enter supervisor mode'
+    self.PrintToCommandWindow(message)
+    self.log.Info('Supmode', message)
+    self.sup_mode = True
+    self.button_supervisor_toggle.SetLabel(self.BUTTON_LEAVE_SUP_MODE)
+    self.SetMenuBar(self.menubar)
+    self.cmd_output_wrap.Show()
+    self.OnLeaveAutoProv()
 
   def OnManualProvision(self, event):
     """Manual provision key asynchronously.
@@ -1123,6 +1532,9 @@ class Atft(wx.Frame):
     event = Event(self.select_file_event, value=data)
     wx.QueueEvent(self, event)
 
+  def ChangeSettings(self, event):
+    pass
+
   def ProcessProductAttributesFile(self, pathname):
     """Process the selected product attributes file.
 
@@ -1133,6 +1545,8 @@ class Atft(wx.Frame):
       with open(pathname, 'r') as attribute_file:
         content = attribute_file.read()
         self.atft_manager.ProcessProductAttributesFile(content)
+        if self.start_screen_shown:
+          self.HideStartScreen()
         # Update the product name display
         self.product_name_display.SetLabelText(
             self.atft_manager.product_info.product_name)
@@ -1140,9 +1554,11 @@ class Atft(wx.Frame):
         if self.atft_manager.atfa_dev and self.atft_manager.product_info:
           self._UpdateKeysLeftInATFA()
     except IOError:
-      self._SendAlertEvent(self.ALERT_CANNOT_OPEN_FILE + pathname)
-    except ProductAttributesFileFormatError:
+      self._SendAlertEvent(
+          self.ALERT_CANNOT_OPEN_FILE + pathname.encode('utf-8'))
+    except ProductAttributesFileFormatError as e:
       self._SendAlertEvent(self.ALERT_PRODUCT_FILE_FORMAT_WRONG)
+      self._HandleException('W', e)
 
   def OnChangeKeyThreshold(self, event):
     """Change the threshold for low number of key warning.
@@ -1258,14 +1674,6 @@ class Atft(wx.Frame):
     if self._ShowWarning(self.ALERT_CONFIRM_PURGE_KEY):
       self._CreateThread(self._PurgeKey)
 
-  def OnProcessKey(self, event):
-    """The async operation to ask ATFA device to process the stored keybundle.
-
-    Args:
-      event: The button click event.
-    """
-    self._CreateThread(self._ProcessKey)
-
   def ShowAlert(self, msg):
     """Show an alert box at the center of the parent window.
 
@@ -1305,17 +1713,7 @@ class Atft(wx.Frame):
   def _HandleKeysLeft(self):
     """Display how many keys left in the ATFA device.
     """
-    if self.atft_manager.atfa_dev and self.atft_manager.product_info:
-      keys_left = self._GetCachedATFAKeysLeft()
-      if not keys_left:
-        # If keys_left is not set, try to set it.
-        self._UpdateKeysLeftInATFA()
-        keys_left = self._GetCachedATFAKeysLeft()
-      if keys_left and keys_left >= 0:
-        self.keys_left_display.SetLabelText(str(keys_left))
-        return
-
-    self.keys_left_display.SetLabelText('')
+    pass
 
   def _ShowWarning(self, text):
     """Show a warning to the user.
@@ -1420,6 +1818,22 @@ class Atft(wx.Frame):
     # Bind the close event
     self.Bind(wx.EVT_CLOSE, self.OnClose)
 
+  def _DeviceSelectHandler(self, event, index):
+    """The handler to handle user selecting a target device.
+    Args:
+      event: The triggering event.
+      index: The index for the target device.
+    """
+    dev_component = self.target_devs_components[index]
+    title_background = dev_component.title_background
+    if not dev_component.selected:
+      title_background.SetBackgroundColour(self.COLOR_PICK_BLUE)
+    else:
+      title_background.SetBackgroundColour(self.COLOR_WHITE)
+    title_background.Refresh()
+    dev_component.selected = not dev_component.selected
+    event.Skip()
+
   def _SendAlertEvent(self, msg):
     """Send an event to generate an alert box.
 
@@ -1512,22 +1926,24 @@ class Atft(wx.Frame):
       event: The event object.
     """
     self._HandleKeysLeft()
-    if self.atft_manager.atfa_dev:
-      atfa_message = str(self.atft_manager.atfa_dev)
-    else:
-      atfa_message = self.ALERT_NO_DEVICE
 
-    if self.auto_prov and not self.atft_manager.atfa_dev:
-      # If ATFA unplugged during auto mode,
-      # exit the mode with an alert.
-      self.OnToggleAutoProv(None)
-      self._SendAlertEvent(self.ALERT_ATFA_UNPLUG)
+    if not self.sup_mode:
+      # If in normal mode
+      if self.auto_prov and not self.atft_manager.atfa_dev:
+        # If ATFA unplugged during normal mode,
+        # exit the mode with an alert.
+        self.OnLeaveAutoProv()
+        # Add log here.
+        self._SendAlertEvent('ATFA device unplugged, exit auto mode!')
+      if not self.auto_prov:
+        # If not already in auto provisioning mode, try enable it.
+        self.OnEnterAutoProv()
 
     # If in auto provisioning mode, handle the newly added devices.
     if self.auto_prov:
       self._HandleAutoProv()
 
-    self.PrintToWindow(self.atfa_devs_output, atfa_message)
+    self._PrintAtfaDevice()
     if self.last_target_list == self.atft_manager.target_devs:
       # Nothing changes, no need to refresh
       return
@@ -1535,15 +1951,56 @@ class Atft(wx.Frame):
     # Update the stored target list. Need to make a deep copy instead of copying
     # the reference.
     self.last_target_list = self._CopyList(self.atft_manager.target_devs)
-    self.target_devs_output.DeleteAllItems()
-    for target_dev in self.atft_manager.target_devs:
-      provision_status_string = ProvisionStatus.ToString(
-          target_dev.provision_status, self.GetLanguageIndex())
-      # This is a utf-8 string, need to transfer to unicode.
-      provision_status_string = provision_status_string.decode('utf-8')
-      self.target_devs_output.Append(
-          (target_dev.serial_number, target_dev.location,
-           provision_status_string))
+    self._PrintTargetDevices()
+
+  def _PrintAtfaDevice(self):
+    """Print atfa device to atfa device output area.
+    """
+    if self.atft_manager.atfa_dev:
+      atfa_message = str(self.atft_manager.atfa_dev)
+    else:
+      atfa_message = self.ALERT_NO_DEVICE
+    self.atfa_dev_output.SetLabel(atfa_message)
+
+  def _PrintTargetDevices(self):
+    """Print target devices to target device output area.
+    """
+    target_devs = self.atft_manager.target_devs
+    for i in range(0, self.TARGET_DEV_SIZE):
+      serial_text = ''
+      status = None
+      serial_number = None
+      if self.device_locations[i]:
+        for target_dev in target_devs:
+          if target_dev.location == self.device_locations[i]:
+            serial_number = target_dev.serial_number
+            serial_text = (
+                self.FIELD_SERIAL_NUMBER + ': ' + str(serial_number))
+            status = target_dev.provision_status
+
+      self._ShowTargetDevice(i, serial_number, serial_text, status)
+
+  def _ShowTargetDevice(self, i, serial_number, serial_text, status):
+    """Display information about one target device.
+
+    Args:
+      i: The slot index of the device to be displayed.
+      serial_nubmer: The serial number of the device.
+      serial_text: The serial number text to be displayed.
+      status: The provision status.
+    """
+    dev_component = self.target_devs_components[i]
+    dev_component.serial_text.SetLabel(serial_text)
+    dev_component.serial_number = serial_number
+    color = self._GetStatusColor(status)
+    if status != None:
+      dev_component.status.SetLabel(
+          ProvisionStatus.ToString(status, self.GetLanguageIndex()))
+    else:
+      dev_component.status.SetLabel('')
+    dev_component.status_wrapper.Layout()
+    dev_component.status_background.SetBackgroundColour(color)
+    dev_component.status_background.Refresh()
 
   def _SelectFileEventHandler(self, event):
     """Show the select file window.
@@ -1695,10 +2152,14 @@ class Atft(wx.Frame):
   def _ShowATFAStatus(self):
     """Show the attestation key status of the ATFA device.
     """
+    try:
+      self.atft_manager.CheckDevice(self.atft_manager.atfa_dev)
+    except DeviceNotFoundException:
+      self._SendAlertEvent(self.ALERT_NO_ATFA)
+      return
     if self._UpdateKeysLeftInATFA():
       self._SendAlertEvent(
-          'There are ' + str(self._GetCachedATFAKeysLeft()) +
-          ' keys left for this product in the ATFA device.')
+          self.ALERT_KEYS_LEFT(self.atft_manager.GetATFAKeysLeft()))
 
   def _FuseVbootKey(self, selected_serials):
     """Fuse the verified boot key to the devices.
@@ -2049,7 +2510,7 @@ class Atft(wx.Frame):
         if self._GetCachedATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
-          self.OnToggleAutoProv(None)
+          self.OnLeaveAutoProv()
       break
     self.auto_dev_serials.remove(serial)
     self.auto_prov_lock.release()
@@ -2195,17 +2656,11 @@ class Atft(wx.Frame):
       A list of serial numbers of the selected target devices.
     """
     selected_serials = []
-    selected_item = self.target_devs_output.GetFirstSelected()
-    if selected_item == -1:
-      return selected_serials
-    serial = self.target_devs_output.GetItem(selected_item, 0).GetText()
-    selected_serials.append(serial)
-    while True:
-      selected_item = self.target_devs_output.GetNextSelected(selected_item)
-      if selected_item == -1:
-        break
-      serial = self.target_devs_output.GetItem(selected_item, 0).GetText()
-      selected_serials.append(serial)
+    i = 0
+    for dev_component in self.target_devs_components:
+      if self.device_locations[i] and dev_component.selected:
+        selected_serials.append(dev_component.serial_number)
+      i += 1
     return selected_serials
 
 
