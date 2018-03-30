@@ -22,9 +22,12 @@ from atftman import EncryptionAlgorithm
 from atftman import ProductInfo
 from atftman import ProvisionState
 from atftman import ProvisionStatus
+from fastboot_exceptions import DeviceCreationException
 from fastboot_exceptions import DeviceNotFoundException
 from fastboot_exceptions import FastbootFailure
 from fastboot_exceptions import NoAlgorithmAvailableException
+from fastboot_exceptions import OsVersionNotAvailableException
+from fastboot_exceptions import OsVersionNotCompatibleException
 from fastboot_exceptions import ProductAttributesFileFormatError
 from fastboot_exceptions import ProductNotSpecifiedException
 from mock import call
@@ -100,9 +103,55 @@ class AtftManTest(unittest.TestCase):
     self.configs = {}
     self.configs['ATFA_REBOOT_TIMEOUT'] = 30
     self.configs['DEFAULT_KEY_THRESHOLD'] = 100
+    self.configs['COMPATIBLE_ATFA_VERSION'] = 10
+
+  # Test ProvisionStatus
+  def GetAllProvisionStatus(self):
+    return [ProvisionStatus.IDLE,
+            ProvisionStatus.WAITING,
+            ProvisionStatus.FUSEVBOOT_ING,
+            ProvisionStatus.FUSEVBOOT_SUCCESS,
+            ProvisionStatus.FUSEVBOOT_FAILED,
+            ProvisionStatus.REBOOT_ING,
+            ProvisionStatus.REBOOT_SUCCESS,
+            ProvisionStatus.REBOOT_FAILED,
+            ProvisionStatus.FUSEATTR_ING,
+            ProvisionStatus.FUSEATTR_SUCCESS,
+            ProvisionStatus.FUSEATTR_FAILED,
+            ProvisionStatus.LOCKAVB_ING,
+            ProvisionStatus.LOCKAVB_SUCCESS,
+            ProvisionStatus.LOCKAVB_FAILED,
+            ProvisionStatus.PROVISION_ING,
+            ProvisionStatus.PROVISION_SUCCESS,
+            ProvisionStatus.PROVISION_FAILED]
+
+  def testProvisionStatus(self):
+    status_list = self.GetAllProvisionStatus()
+    for status in status_list:
+      self.assertNotEqual('', ProvisionStatus.ToString(status, 0))
+      self.assertNotEqual('', ProvisionStatus.ToString(status, 1))
+    self.assertEqual(
+        True, ProvisionStatus.isSuccess(ProvisionStatus.LOCKAVB_SUCCESS))
+    self.assertEqual(
+        False, ProvisionStatus.isProcessing(ProvisionStatus.LOCKAVB_SUCCESS))
+    self.assertEqual(
+        False, ProvisionStatus.isFailed(ProvisionStatus.LOCKAVB_SUCCESS))
+    self.assertEqual(
+        False, ProvisionStatus.isSuccess(ProvisionStatus.FUSEATTR_ING))
+    self.assertEqual(
+        True, ProvisionStatus.isProcessing(ProvisionStatus.FUSEATTR_ING))
+    self.assertEqual(
+        False, ProvisionStatus.isFailed(ProvisionStatus.FUSEATTR_ING))
+    self.assertEqual(
+        False, ProvisionStatus.isSuccess(ProvisionStatus.PROVISION_FAILED))
+    self.assertEqual(
+        False, ProvisionStatus.isProcessing(ProvisionStatus.PROVISION_FAILED))
+    self.assertEqual(
+        True, ProvisionStatus.isFailed(ProvisionStatus.PROVISION_FAILED))
 
   # Test AtftManager.ListDevices
   class MockInstantTimer(object):
+
     def __init__(self, timeout, callback):
       self.timeout = timeout
       self.callback = callback
@@ -113,42 +162,57 @@ class AtftManTest(unittest.TestCase):
   def MockCreateInstantTimer(self, timeout, callback):
     return self.MockInstantTimer(timeout, callback)
 
+  def MockAddNewAtfa(self, serial, atft, mock_fastboot):
+    mock_fastboot(self)
+    atft._serial_mapper.refresh_serial_map()
+    atft.atfa_dev = atftman.DeviceInfo(
+        MagicMock(), serial, atft._serial_mapper.get_location(serial))
+
   @patch('threading.Timer')
   @patch('__main__.AtftManTest.FastbootDeviceTemplate.ListDevices')
   def testListDevicesNormal(self, mock_list_devices, mock_create_timer):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._SetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+    # Mock creating a new atfa device.
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=MagicMock():
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
+    atft_manager.CheckProvisionStatus = MagicMock()
     mock_list_devices.return_value = [self.TEST_SERIAL, self.ATFA_TEST_SERIAL]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
+    # After adding a new target device, need to check its status.
+    atft_manager.CheckProvisionStatus.assert_called_once()
     self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
     self.assertEqual(1, len(atft_manager.target_devs))
     self.assertEqual(atft_manager.target_devs[0].serial_number,
                      self.TEST_SERIAL)
-    self.assertEqual(None, atft_manager._atfa_dev_setting)
-    self.assertEqual(True, atft_manager._atfa_reboot_lock.acquire(False))
-    atft_manager._SetOs.assert_not_called()
 
   @patch('threading.Timer')
   @patch('__main__.AtftManTest.FastbootDeviceTemplate.ListDevices')
-  def testListDevicesNormalSetOs(self, mock_list_devices, mock_create_timer):
+  def testListDevicesErrorCreation(self, mock_list_devices, mock_create_timer):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._SetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Linux'
+    # Mock creating a new atfa device.
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=MagicMock():
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
+    # While checking provision status, there is an error
+    atft_manager.CheckProvisionStatus = MagicMock()
+    atft_manager.CheckProvisionStatus.side_effect = FastbootFailure('')
     mock_list_devices.return_value = [self.TEST_SERIAL, self.ATFA_TEST_SERIAL]
     atft_manager.ListDevices()
-    atft_manager.ListDevices()
-    atft_manager._GetOs.assert_called()
-    atft_manager._SetOs.assert_called_once_with(
-        atft_manager.atfa_dev, 'Windows')
+    # Need to raise the DeviceCreationException.
+    with self.assertRaises(DeviceCreationException):
+      atft_manager.ListDevices()
+    # After adding a new target device, need to check its status.
+    atft_manager.CheckProvisionStatus.assert_called_once()
     self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
+    self.assertEqual(0, len(atft_manager.target_devs))
 
   @patch('threading.Timer')
   @patch('__main__.AtftManTest.FastbootDeviceTemplate.ListDevices')
@@ -156,8 +220,10 @@ class AtftManTest(unittest.TestCase):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=MagicMock():
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
     mock_list_devices.return_value = [self.ATFA_TEST_SERIAL]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
@@ -170,8 +236,6 @@ class AtftManTest(unittest.TestCase):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
     mock_list_devices.return_value = [self.TEST_SERIAL]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
@@ -186,8 +250,6 @@ class AtftManTest(unittest.TestCase):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
     mock_list_devices.return_value = [self.TEST_SERIAL, self.TEST_SERIAL2]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
@@ -205,8 +267,10 @@ class AtftManTest(unittest.TestCase):
     mock_fastboot.side_effect = self.MockInit
     atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
                                        self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=mock_fastboot:
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
     mock_fastboot.ListDevices.return_value = [self.ATFA_TEST_SERIAL]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
@@ -224,10 +288,12 @@ class AtftManTest(unittest.TestCase):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     mock_fastboot = MagicMock()
     mock_fastboot.side_effect = self.MockInit
-    atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
-                                       self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=mock_fastboot:
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
     mock_fastboot.ListDevices.return_value = [self.ATFA_TEST_SERIAL]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
@@ -238,19 +304,20 @@ class AtftManTest(unittest.TestCase):
     atft_manager.ListDevices()
     self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
     self.assertEqual(1, len(atft_manager.target_devs))
-    self.assertEqual(atft_manager.target_devs[0].serial_number,
-                     self.TEST_SERIAL)
-    self.assertEqual(2, mock_fastboot.call_count)
+    self.assertEqual(
+        atft_manager.target_devs[0].serial_number, self.TEST_SERIAL)
 
   @patch('threading.Timer')
   def testListDevicesChangeAddATFA(self, mock_create_timer):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     mock_fastboot = MagicMock()
     mock_fastboot.side_effect = self.MockInit
-    atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
-                                       self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=mock_fastboot:
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
     mock_fastboot.ListDevices.return_value = [self.TEST_SERIAL]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
@@ -261,19 +328,20 @@ class AtftManTest(unittest.TestCase):
     atft_manager.ListDevices()
     self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
     self.assertEqual(1, len(atft_manager.target_devs))
-    self.assertEqual(atft_manager.target_devs[0].serial_number,
-                     self.TEST_SERIAL)
-    self.assertEqual(2, mock_fastboot.call_count)
+    self.assertEqual(
+        atft_manager.target_devs[0].serial_number, self.TEST_SERIAL)
 
   @patch('threading.Timer')
   def testListDevicesChangeCommon(self, mock_create_timer):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     mock_fastboot = MagicMock()
     mock_fastboot.side_effect = self.MockInit
-    atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
-                                       self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=mock_fastboot:
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
     mock_fastboot.ListDevices.return_value = [
         self.ATFA_TEST_SERIAL, self.TEST_SERIAL
     ]
@@ -286,10 +354,10 @@ class AtftManTest(unittest.TestCase):
     atft_manager.ListDevices()
     self.assertEqual(atft_manager.atfa_dev, None)
     self.assertEqual(2, len(atft_manager.target_devs))
-    self.assertEqual(atft_manager.target_devs[0].serial_number,
-                     self.TEST_SERIAL)
-    self.assertEqual(atft_manager.target_devs[1].serial_number,
-                     self.TEST_SERIAL2)
+    self.assertEqual(
+        atft_manager.target_devs[0].serial_number, self.TEST_SERIAL)
+    self.assertEqual(
+        atft_manager.target_devs[1].serial_number, self.TEST_SERIAL2)
     self.assertEqual(3, mock_fastboot.call_count)
 
   @patch('threading.Timer')
@@ -297,10 +365,12 @@ class AtftManTest(unittest.TestCase):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     mock_fastboot = MagicMock()
     mock_fastboot.side_effect = self.MockInit
-    atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
-                                       self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=mock_fastboot:
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
     mock_fastboot.ListDevices.return_value = [
         self.ATFA_TEST_SERIAL, self.TEST_SERIAL
     ]
@@ -314,7 +384,7 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(0, len(atft_manager.target_devs))
     # Second refresh, TEST_SERIAL2 should be added
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
+    self.assertEqual(self.ATFA_TEST_SERIAL, atft_manager.atfa_dev.serial_number)
     self.assertEqual(1, len(atft_manager.target_devs))
     self.assertEqual(atft_manager.target_devs[0].serial_number,
                      self.TEST_SERIAL2)
@@ -325,10 +395,12 @@ class AtftManTest(unittest.TestCase):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     mock_fastboot = MagicMock()
     mock_fastboot.side_effect = self.MockInit
-    atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
-                                       self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=mock_fastboot:
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
     mock_fastboot.ListDevices.return_value = [
         self.ATFA_TEST_SERIAL, self.TEST_SERIAL
     ]
@@ -336,8 +408,8 @@ class AtftManTest(unittest.TestCase):
     atft_manager.ListDevices()
     mock_fastboot.ListDevices.return_value = [self.TEST_SERIAL]
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev, None)
-    self.assertEqual(1, len(atft_manager.target_devs))
+    self.assertEqual(None, atft_manager.atfa_dev)
+    self.assertEqual(2, mock_fastboot.call_count)
     self.assertEqual(atft_manager.target_devs[0].serial_number,
                      self.TEST_SERIAL)
 
@@ -346,18 +418,18 @@ class AtftManTest(unittest.TestCase):
     mock_create_timer.side_effect = self.MockCreateInstantTimer
     mock_fastboot = MagicMock()
     mock_fastboot.side_effect = self.MockInit
-    atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
-                                       self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    atft_manager._AddNewAtfa = MagicMock()
     mock_fastboot.ListDevices.return_value = [
         self.ATFA_TEST_SERIAL, self.TEST_SERIAL
     ]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
+    atft_manager._AddNewAtfa.reset_mock()
     mock_fastboot.ListDevices.return_value = [self.ATFA_TEST_SERIAL]
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
+    atft_manager._AddNewAtfa.assert_called_once_with(self.ATFA_TEST_SERIAL)
     self.assertEqual(0, len(atft_manager.target_devs))
 
   @patch('threading.Timer')
@@ -367,8 +439,6 @@ class AtftManTest(unittest.TestCase):
     mock_fastboot.side_effect = self.MockInit
     atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
                                        self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
     mock_fastboot.ListDevices.return_value = [self.TEST_SERIAL]
     atft_manager.ListDevices()
     # Just appear once, should not be in target device list.
@@ -381,8 +451,6 @@ class AtftManTest(unittest.TestCase):
     mock_fastboot.side_effect = self.MockInit
     atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
                                        self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
     mock_fastboot.ListDevices.return_value = [self.TEST_SERIAL]
     atft_manager.ListDevices()
     self.assertEqual(0, len(atft_manager.target_devs))
@@ -401,8 +469,6 @@ class AtftManTest(unittest.TestCase):
     mock_fastboot.side_effect = self.MockInit
     atft_manager = atftman.AtftManager(mock_fastboot, self.mock_serial_mapper,
                                        self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
     mock_fastboot.ListDevices.return_value = [self.TEST_SERIAL]
     atft_manager.ListDevices()
     self.assertEqual(0, len(atft_manager.target_devs))
@@ -438,9 +504,11 @@ class AtftManTest(unittest.TestCase):
     mock_fastboot = MagicMock()
     mock_fastboot.side_effect = self.MockInit
     atft_manager = atftman.AtftManager(
-      mock_fastboot, mock_serial_mapper, self.configs)
-    atft_manager._GetOs = MagicMock()
-    atft_manager._GetOs.return_value = 'Windows'
+        mock_fastboot, mock_serial_mapper, self.configs)
+    atft_manager._AddNewAtfa = (
+        lambda serial, atft=atft_manager, mock_fastboot=mock_fastboot:
+        self.MockAddNewAtfa(serial, atft_manager, mock_fastboot)
+    )
     mock_fastboot.ListDevices.return_value = [
         self.ATFA_TEST_SERIAL, self.TEST_SERIAL
     ]
@@ -665,7 +733,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) 100\nTEST'
-    test_number = test_atfa_device_manager.UpdateKeysLeft()
+    test_atfa_device_manager.UpdateKeysLeft()
     mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
     self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
 
@@ -678,7 +746,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\r\n(bootloader) 100\r\nTEST'
-    test_number = test_atfa_device_manager.UpdateKeysLeft()
+    test_atfa_device_manager.UpdateKeysLeft()
     mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
     self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
 
@@ -737,12 +805,12 @@ class AtftManTest(unittest.TestCase):
     # All initial state
     self.status_map = {}
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked: 0\n'
-      '(bootloader) bootloader-min-versions: -1,0,3\n'
-      '(bootloader) avb-perm-attr-set: 0\n'
-      '(bootloader) avb-locked: 0\n'
-      '(bootloader) avb-unlock-disabled: 0\n'
-      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked: 0\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 0\n'
+        '(bootloader) avb-locked: 0\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = ''
     mock_device = MagicMock()
     mock_device.GetVar.side_effect = self.MockGetVar
@@ -757,12 +825,12 @@ class AtftManTest(unittest.TestCase):
 
     # AVB locked
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked: 0\n'
-      '(bootloader) bootloader-min-versions: -1,0,3\n'
-      '(bootloader) avb-perm-attr-set: 0\n'
-      '(bootloader) avb-locked: 1\n'
-      '(bootloader) avb-unlock-disabled: 0\n'
-      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked: 0\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 0\n'
+        '(bootloader) avb-locked: 1\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = ''
     atft_manager.CheckProvisionStatus(mock_device)
     self.assertEqual(ProvisionStatus.LOCKAVB_SUCCESS,
@@ -770,12 +838,12 @@ class AtftManTest(unittest.TestCase):
 
     # Permanent attributes fused
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked: 0\n'
-      '(bootloader) bootloader-min-versions: -1,0,3\n'
-      '(bootloader) avb-perm-attr-set: 1\n'
-      '(bootloader) avb-locked: 0\n'
-      '(bootloader) avb-unlock-disabled: 0\n'
-      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked: 0\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 1\n'
+        '(bootloader) avb-locked: 0\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = ''
     atft_manager.CheckProvisionStatus(mock_device)
     self.assertEqual(ProvisionStatus.FUSEATTR_SUCCESS,
@@ -783,12 +851,12 @@ class AtftManTest(unittest.TestCase):
 
     # Bootloader locked
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked: 1\n'
-      '(bootloader) bootloader-min-versions: -1,0,3\n'
-      '(bootloader) avb-perm-attr-set: 0\n'
-      '(bootloader) avb-locked: 0\n'
-      '(bootloader) avb-unlock-disabled: 0\n'
-      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked: 1\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 0\n'
+        '(bootloader) avb-locked: 0\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = ''
     atft_manager.CheckProvisionStatus(mock_device)
     self.assertEqual(ProvisionStatus.FUSEVBOOT_SUCCESS,
@@ -800,45 +868,48 @@ class AtftManTest(unittest.TestCase):
     # All initial state
     self.status_map = {}
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked=1\n'
-      '(bootloader) bootloader-min-versions=-1,0,3\n'
-      '(bootloader) avb-perm-attr-set=0\n'
-      '(bootloader) avb-locked=0\n'
-      '(bootloader) avb-unlock-disabled=0\n'
-      '(bootloader) avb-min-versions=0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked=1\n'
+        '(bootloader) bootloader-min-versions=-1,0,3\n'
+        '(bootloader) avb-perm-attr-set=0\n'
+        '(bootloader) avb-locked=0\n'
+        '(bootloader) avb-unlock-disabled=0\n'
+        '(bootloader) avb-min-versions=0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = ''
     mock_device = MagicMock()
     mock_device.GetVar.side_effect = self.MockGetVar
     atft_manager.CheckProvisionStatus(mock_device)
-    self.assertEqual(ProvisionStatus.FUSEVBOOT_SUCCESS, mock_device.provision_status)
+    self.assertEqual(
+        ProvisionStatus.FUSEVBOOT_SUCCESS, mock_device.provision_status)
     self.assertEqual(True, mock_device.provision_state.bootloader_locked)
 
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked:1\n'
-      '(bootloader) bootloader-min-versions:-1,0,3\n'
-      '(bootloader) avb-perm-attr-set:0\n'
-      '(bootloader) avb-locked:0\n'
-      '(bootloader) avb-unlock-disabled:0\n'
-      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked:1\n'
+        '(bootloader) bootloader-min-versions:-1,0,3\n'
+        '(bootloader) avb-perm-attr-set:0\n'
+        '(bootloader) avb-locked:0\n'
+        '(bootloader) avb-unlock-disabled:0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = ''
     mock_device = MagicMock()
     mock_device.GetVar.side_effect = self.MockGetVar
     atft_manager.CheckProvisionStatus(mock_device)
-    self.assertEqual(ProvisionStatus.FUSEVBOOT_SUCCESS, mock_device.provision_status)
+    self.assertEqual(
+        ProvisionStatus.FUSEVBOOT_SUCCESS, mock_device.provision_status)
     self.assertEqual(True, mock_device.provision_state.bootloader_locked)
 
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked:\t1\n'
-      '(bootloader) bootloader-min-versions:\t-1,0,3\n'
-      '(bootloader) avb-perm-attr-set:\t0\n'
-      '(bootloader) avb-locked:\t0\n'
-      '(bootloader) avb-unlock-disabled:\t0\n'
-      '(bootloader) avb-min-versions:\t0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked:\t1\n'
+        '(bootloader) bootloader-min-versions:\t-1,0,3\n'
+        '(bootloader) avb-perm-attr-set:\t0\n'
+        '(bootloader) avb-locked:\t0\n'
+        '(bootloader) avb-unlock-disabled:\t0\n'
+        '(bootloader) avb-min-versions:\t0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = ''
     mock_device = MagicMock()
     mock_device.GetVar.side_effect = self.MockGetVar
     atft_manager.CheckProvisionStatus(mock_device)
-    self.assertEqual(ProvisionStatus.FUSEVBOOT_SUCCESS, mock_device.provision_status)
+    self.assertEqual(
+        ProvisionStatus.FUSEVBOOT_SUCCESS, mock_device.provision_status)
     self.assertEqual(True, mock_device.provision_state.bootloader_locked)
 
   def testCheckProvisionState(self):
@@ -847,12 +918,12 @@ class AtftManTest(unittest.TestCase):
     # All initial state
     self.status_map = {}
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked: 0\n'
-      '(bootloader) bootloader-min-versions: -1,0,3\n'
-      '(bootloader) avb-perm-attr-set: 0\n'
-      '(bootloader) avb-locked: 0\n'
-      '(bootloader) avb-unlock-disabled: 0\n'
-      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked: 0\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 0\n'
+        '(bootloader) avb-locked: 0\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = ''
     mock_device = MagicMock()
     mock_device.GetVar.side_effect = self.MockGetVar
@@ -872,12 +943,12 @@ class AtftManTest(unittest.TestCase):
 
     # AVB locked and attestation key provisioned
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked: 0\n'
-      '(bootloader) bootloader-min-versions: -1,0,3\n'
-      '(bootloader) avb-perm-attr-set: 0\n'
-      '(bootloader) avb-locked: 1\n'
-      '(bootloader) avb-unlock-disabled: 0\n'
-      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked: 0\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 0\n'
+        '(bootloader) avb-locked: 1\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = self.TEST_UUID
     atft_manager.CheckProvisionStatus(mock_device)
     self.assertEqual(False, mock_device.provision_state.bootloader_locked)
@@ -889,12 +960,12 @@ class AtftManTest(unittest.TestCase):
 
     # Permanent attributes fused
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked: 0\n'
-      '(bootloader) bootloader-min-versions: -1,0,3\n'
-      '(bootloader) avb-perm-attr-set: 1\n'
-      '(bootloader) avb-locked: 0\n'
-      '(bootloader) avb-unlock-disabled: 0\n'
-      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked: 0\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 1\n'
+        '(bootloader) avb-locked: 0\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = ''
     atft_manager.CheckProvisionStatus(mock_device)
     self.assertEqual(False, mock_device.provision_state.bootloader_locked)
@@ -904,12 +975,12 @@ class AtftManTest(unittest.TestCase):
 
     # All status set
     self.status_map['at-vboot-state'] = (
-      '(bootloader) bootloader-locked: 1\n'
-      '(bootloader) bootloader-min-versions: -1,0,3\n'
-      '(bootloader) avb-perm-attr-set: 1\n'
-      '(bootloader) avb-locked: 1\n'
-      '(bootloader) avb-unlock-disabled: 0\n'
-      '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+        '(bootloader) bootloader-locked: 1\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 1\n'
+        '(bootloader) avb-locked: 1\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
     self.status_map['at-attest-uuid'] = self.TEST_UUID
     atft_manager.CheckProvisionStatus(mock_device)
     self.assertEqual(True, mock_device.provision_state.bootloader_locked)
@@ -957,9 +1028,9 @@ class AtftManTest(unittest.TestCase):
     ]
     atft_manager.TransferContent.assert_has_calls(transfer_content_calls)
     atfa_oem_calls = [
-        call('atfa-start-provisioning ' +
+        call('start-provisioning ' +
              str(EncryptionAlgorithm.ALGORITHM_CURVE25519)),
-        call('atfa-finish-provisioning')
+        call('finish-provisioning')
     ]
     target_oem_calls = [
         call('at-get-ca-request'),
@@ -1298,8 +1369,6 @@ class AtftManTest(unittest.TestCase):
     self.mock_timer_instance = None
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
-    mock_target = MagicMock()
-    mock_target.serial_number = self.TEST_SERIAL
     timeout = 1
     atft_manager.stable_serials.append(self.TEST_SERIAL)
     test_device = atftman.DeviceInfo(None, self.TEST_SERIAL, self.TEST_LOCATION)
@@ -1310,15 +1379,53 @@ class AtftManTest(unittest.TestCase):
     atft_manager.CheckProvisionStatus = MagicMock()
     atft_manager.CheckProvisionStatus.side_effect = self.MockSetFuseVbootSuccess
     mock_timer.side_effect = self.mock_create_timer
-    mock_target.Reboot.side_effect = FastbootFailure('')
+    test_device.Reboot = MagicMock()
+    test_device.Reboot.side_effect = FastbootFailure('')
 
     with self.assertRaises(FastbootFailure):
-      atft_manager.Reboot(mock_target, timeout, mock_success, mock_fail)
+      atft_manager.Reboot(test_device, timeout, mock_success, mock_fail)
 
     # There should be no timeout timer.
     self.assertEqual(None, self.mock_timer_instance)
     # mock refresh event.
     atft_manager._HandleRebootCallbacks()
+    mock_success.assert_not_called()
+    mock_fail.assert_not_called()
+
+  @patch('threading.Timer')
+  def testRebootFailureAfterReboot(self, mock_timer):
+    self.mock_timer_instance = None
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    timeout = 1
+    atft_manager.stable_serials.append(self.TEST_SERIAL)
+    mock_fastboot = MagicMock()
+    test_device = atftman.DeviceInfo(
+        mock_fastboot, self.TEST_SERIAL, self.TEST_LOCATION)
+    atft_manager.target_devs.append(test_device)
+    mock_success = MagicMock()
+    mock_fail = MagicMock()
+    atft_manager.CheckProvisionStatus = MagicMock()
+    # The check status failed after the reboot
+    atft_manager.CheckProvisionStatus.side_effect = FastbootFailure('')
+    mock_timer.side_effect = self.mock_create_timer
+
+    atft_manager.Reboot(test_device, timeout, mock_success, mock_fail)
+
+    mock_fastboot.Reboot.assert_called_once()
+
+    # The timer should still be there.
+    self.assertNotEqual(None, self.mock_timer_instance)
+    # Put serial into stable serials.
+    atft_manager.stable_serials = [self.TEST_SERIAL]
+    # mock refresh event.
+    with self.assertRaises(DeviceCreationException):
+      atft_manager._HandleRebootCallbacks()
+
+    # The timer should still be there.
+    self.assertNotEqual(None, self.mock_timer_instance)
+    # Success or fail should not be called.
+    # We would treat this as we have not seen the device.
     mock_success.assert_not_called()
     mock_fail.assert_not_called()
 
@@ -1402,6 +1509,73 @@ class AtftManTest(unittest.TestCase):
                                        self.mock_serial_mapper, self.configs)
     with self.assertRaises(ProductAttributesFileFormatError):
       atft_manager.ProcessProductAttributesFile(test_content)
+
+  # Test _AddNewAtfa
+  def testAddNewAtfa(self):
+    mock_fastboot = MagicMock()
+    mock_fastboot_controller = MagicMock()
+    mock_fastboot.return_value = mock_fastboot_controller
+    mock_fastboot_controller.GetVar = MagicMock()
+    mock_fastboot_controller.GetVar.return_value = '10'
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    atft_manager._AddNewAtfa(self.ATFA_TEST_SERIAL)
+    mock_fastboot.assert_called_once_with(self.ATFA_TEST_SERIAL)
+    mock_fastboot_controller.GetVar.assert_has_calls(
+        [call('version'), call('os-version')])
+    self.assertEqual(self.ATFA_TEST_SERIAL, atft_manager.atfa_dev.serial_number)
+
+  def testAddNewAtfaVersionNotCompatible(self):
+    mock_fastboot = MagicMock()
+    mock_fastboot_controller = MagicMock()
+    mock_fastboot.return_value = mock_fastboot_controller
+    mock_fastboot_controller.GetVar = MagicMock()
+    mock_fastboot_controller.GetVar.return_value = '8'
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    with self.assertRaises(OsVersionNotCompatibleException):
+      atft_manager._AddNewAtfa(self.ATFA_TEST_SERIAL)
+
+    mock_fastboot.assert_called_once_with(self.ATFA_TEST_SERIAL)
+    mock_fastboot_controller.GetVar.assert_has_calls(
+        [call('version'), call('os-version')])
+    self.assertEqual(self.ATFA_TEST_SERIAL, atft_manager.atfa_dev.serial_number)
+
+  def MockOsVersionException(self, name):
+    if name == 'os-version':
+      raise FastbootFailure('')
+    else:
+      return ''
+
+  def MockGetVersionException(self, name):
+    if name == 'version':
+      raise FastbootFailure('')
+    else:
+      return ''
+
+  def testAddNewAtfaVersionNotAvailable(self):
+    mock_fastboot = MagicMock()
+    mock_fastboot_controller = MagicMock()
+    mock_fastboot.return_value = mock_fastboot_controller
+    mock_fastboot_controller.GetVar = self.MockOsVersionException
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    with self.assertRaises(OsVersionNotAvailableException):
+      atft_manager._AddNewAtfa(self.ATFA_TEST_SERIAL)
+    self.assertEqual(self.ATFA_TEST_SERIAL, atft_manager.atfa_dev.serial_number)
+
+  # If the atfa device is not ready yet, the getvar('version') would throw
+  # exception, we just ignore this device if it is not ready.
+  def testAddNewAtfaNotReadyYet(self):
+    mock_fastboot = MagicMock()
+    mock_fastboot_controller = MagicMock()
+    mock_fastboot.return_value = mock_fastboot_controller
+    mock_fastboot_controller.GetVar = self.MockGetVersionException
+    atft_manager = atftman.AtftManager(
+        mock_fastboot, self.mock_serial_mapper, self.configs)
+    atft_manager._AddNewAtfa(self.ATFA_TEST_SERIAL)
+    self.assertEqual(None, atft_manager.atfa_dev)
+
 
 if __name__ == '__main__':
   unittest.main()
