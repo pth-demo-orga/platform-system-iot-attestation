@@ -1894,7 +1894,7 @@ class Atft(wx.Frame):
     if self.auto_prov:
       return
     if (self.atft_manager.atfa_dev and self.atft_manager.product_info and
-        self.atft_manager.GetATFAKeysLeft() > 0):
+        self.atft_manager.GetCachedATFAKeysLeft() > 0):
       # If product info file is chosen and atfa device is present and there are
       # keys left. Enter auto provisioning mode.
       self.auto_prov = True
@@ -2302,11 +2302,11 @@ class Atft(wx.Frame):
     try:
       if not self.atft_manager.atfa_dev or not self.atft_manager.product_info:
         raise DeviceNotFoundException
-      keys_left = self.atft_manager.GetATFAKeysLeft()
+      keys_left = self.atft_manager.GetCachedATFAKeysLeft()
       if not keys_left:
         # If keys_left is not set, try to set it.
-        self._CheckATFAStatus()
-        keys_left = self.atft_manager.GetATFAKeysLeft()
+        self._UpdateKeysLeftInATFA()
+        keys_left = self.atft_manager.GetCachedATFAKeysLeft()
       if not keys_left or keys_left < 0:
         raise NoKeysException
 
@@ -2870,7 +2870,7 @@ class Atft(wx.Frame):
       return
     if self._UpdateKeysLeftInATFA():
       self._SendAlertEvent(
-          self.ALERT_KEYS_LEFT(self.atft_manager.GetATFAKeysLeft()))
+          self.ALERT_KEYS_LEFT(self.atft_manager.GetCachedATFAKeysLeft()))
 
   def _FuseVbootKey(self, selected_serials):
     """Fuse the verified boot key to the devices.
