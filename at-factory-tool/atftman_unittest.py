@@ -795,6 +795,19 @@ class AtftManTest(unittest.TestCase):
     with self.assertRaises(FastbootFailure):
       test_atfa_device_manager.UpdateKeysLeft()
 
+  def testUpdateKeysLeftNoMatchingProduct(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa_dev = MagicMock()
+    atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager.product_info = MagicMock()
+    atft_manager.product_info.product_id = self.TEST_ID
+    mock_atfa_dev.Oem.side_effect = FastbootFailure(
+        'No matching available products')
+    test_atfa_device_manager.UpdateKeysLeft()
+    self.assertEqual(0, mock_atfa_dev.keys_left)
+
   # Test AtftManager.CheckProvisionStatus
   def MockGetVar(self, variable):
     return self.status_map.get(variable)
