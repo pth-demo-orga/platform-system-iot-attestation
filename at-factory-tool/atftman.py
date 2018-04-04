@@ -1021,23 +1021,31 @@ class AtfaDeviceManager(object):
       raise ProductNotSpecifiedException()
 
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    # -1 means some error happens.
-    self.atft_manager.atfa_dev.keys_left = -1
-    out = self.atft_manager.atfa_dev.Oem(
-        'num-keys ' + self.atft_manager.product_info.product_id, True)
-    # Note: use splitlines instead of split('\n') to prevent '\r\n' problem on
-    # windows.
-    for line in out.splitlines():
-      if line.startswith('(bootloader) '):
-        try:
-          self.atft_manager.atfa_dev.keys_left = int(
-              line.replace('(bootloader) ', ''))
-          return
-        except ValueError:
-          raise FastbootFailure(
-              'ATFA device response has invalid format')
+    try:
+      out = self.atft_manager.atfa_dev.Oem(
+          'num-keys ' + self.atft_manager.product_info.product_id, True)
+      # Note: use splitlines instead of split('\n') to prevent '\r\n' problem on
+      # windows.
+      for line in out.splitlines():
+        if line.startswith('(bootloader) '):
+          try:
+            self.atft_manager.atfa_dev.keys_left = int(
+                line.replace('(bootloader) ', ''))
+            return
+          except ValueError:
+            raise FastbootFailure(
+                'ATFA device response has invalid format')
 
-    raise FastbootFailure('ATFA device response has invalid format')
+      raise FastbootFailure('ATFA device response has invalid format')
+    except FastbootFailure as e:
+      if 'No matching available products' in e.msg:
+        # If there's no matching product key, we set keys left to 0.
+        self.atft_manager.atfa_dev.keys_left = 0
+        return
+      else:
+        # -1 means some error happens.
+        self.atft_manager.atfa_dev.keys_left = -1
+        raise e
 
   def PurgeKey(self):
     """Purge the key for the product
