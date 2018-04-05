@@ -2216,7 +2216,7 @@ class Atft(wx.Frame):
 
     message = self.DIALOG_CHOOSE_KEY_FILE
     wildcard = self.KEY_FILE_EXTENSION
-    callback = self._ProcessKey
+    callback = self._ProcessKeyCallback
     data = self.SelectFileArg(message, wildcard, callback)
     event = Event(self.select_file_event, value=data)
     wx.QueueEvent(self, event)
@@ -2238,7 +2238,7 @@ class Atft(wx.Frame):
 
     message = self.DIALOG_CHOOSE_UPDATE_FILE
     wildcard = self.UPDATE_FILE_EXTENSION
-    callback = self._UpdateATFA
+    callback = self._UpdateATFACallback
     data = self.SelectFileArg(message, wildcard, callback)
     event = Event(self.select_file_event, value=data)
     wx.QueueEvent(self, event)
@@ -3244,6 +3244,9 @@ class Atft(wx.Frame):
     self.auto_dev_serials.remove(serial)
     self.auto_prov_lock.release()
 
+  def _ProcessKeyCallback(self, pathname):
+    self._CreateThread(self._ProcessKey, pathname)
+
   def _ProcessKey(self, pathname):
     """Ask ATFA device to store and process the stored keybundle.
 
@@ -3273,6 +3276,9 @@ class Atft(wx.Frame):
     finally:
       self.ResumeRefresh()
 
+  def _UpdateATFACallback(self, pathname):
+    self._CreateThread(self._UpdateATFA, pathname)
+
   def _UpdateATFA(self, pathname):
     """Ask ATFA device to store and process the stored keybundle.
 
@@ -3286,10 +3292,6 @@ class Atft(wx.Frame):
       self.atft_manager.atfa_dev.Download(pathname)
       self.atft_manager.UpdateATFA()
       self._SendOperationSucceedEvent(operation)
-
-      # Check ATFA status after update succeeds.
-      if self.atft_manager.product_info:
-        self._UpdateKeysLeftInATFA()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException('W', e, operation)
@@ -3328,10 +3330,10 @@ class Atft(wx.Frame):
       self.ResumeRefresh()
 
   def _GetRegFile(self, filepath):
-    self._GetFileFromATFA(filepath, 'reg')
+    self._CreateThread(self._GetFileFromATFA, filepath, 'reg')
 
   def _GetAuditFile(self, filepath):
-    self._GetFileFromATFA(filepath, 'audit')
+    self._CreateThread(self._GetFileFromATFA, filepath, 'audit')
 
   def _GetFileFromATFA(self, filepath, file_type):
     """Download a type of file from the ATFA device.
