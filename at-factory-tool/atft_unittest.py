@@ -39,6 +39,7 @@ class MockAtft(atft.Atft):
     self._SendPrintEvent = MagicMock()
     self._OnToggleSupMode = MagicMock()
     self.ShowStartScreen = MagicMock()
+    self._CreateThread = self._MockCreateThread
     self.TARGET_DEV_SIZE = 6
     atft.Atft.__init__(self)
 
@@ -53,8 +54,10 @@ class MockAtft(atft.Atft):
     self.LANGUAGE = 'ENG'
     self.REBOOT_TIMEOUT = 1.0
     self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = '*.atpa'
-
     return {}
+
+  def _MockCreateThread(self, target, *args):
+    target(*args)
 
 
 class TestDeviceInfo(object):
@@ -1327,7 +1330,6 @@ class AtftTest(unittest.TestCase):
 
     mock_atft._SendOperationStartEvent.assert_called_once()
     mock_atft._SendOperationSucceedEvent.assert_called_once()
-    mock_atft._UpdateKeysLeftInATFA.assert_called_once()
 
   def testUpdateATFAFailure(self):
     self.TestUpdateATFAFailureCommon(
