@@ -1189,9 +1189,59 @@ class AtftTest(unittest.TestCase):
     self.device_map[self.TEST_SERIAL2] = test_dev2
     self.device_map[self.TEST_SERIAL3] = test_dev3
     serials = [self.TEST_SERIAL1, self.TEST_SERIAL2, self.TEST_SERIAL3]
-    mock_atft._ManualProvision(serials)
+    mock_atft._GetSelectedSerials = MagicMock()
+    mock_atft._GetSelectedSerials.return_value = serials
+    mock_atft.atft_manager.atfa_dev = MagicMock()
+    mock_atft._ShowWarning = MagicMock()
+    mock_atft._ShowWarning.return_value = False
+    mock_atft.OnManualProvision(None)
     calls = [call(test_dev1), call(test_dev2)]
     mock_atft.atft_manager.Provision.assert_has_calls(calls)
+
+  def testManualProvisionReprovision(self):
+    mock_atft = MockAtft()
+    mock_atft.PauseRefresh = MagicMock()
+    mock_atft.ResumeRefresh = MagicMock()
+    mock_atft._SendStartMessageEvent = MagicMock()
+    mock_atft._SendSucceedMessageEvent = MagicMock()
+    mock_atft._HandleException = MagicMock()
+    mock_atft.atft_manager.Provision = MagicMock()
+    mock_atft._SendAlertEvent = MagicMock()
+    mock_atft._CheckLowKeyAlert = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.side_effect = (
+        self.MockGetTargetDevice)
+    test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
+                               ProvisionStatus.PROVISION_FAILED)
+    test_dev1.provision_state.bootloader_locked = True
+    test_dev1.provision_state.avb_perm_attr_set = True
+    test_dev1.provision_state.avb_locked = True
+    test_dev2 = TestDeviceInfo(self.TEST_SERIAL2, self.TEST_LOCATION2,
+                               ProvisionStatus.PROVISION_SUCCESS)
+    test_dev2.provision_state.bootloader_locked = True
+    test_dev2.provision_state.avb_perm_attr_set = True
+    test_dev2.provision_state.avb_locked = True
+    test_dev2.provision_state.provisioned = True
+    self.device_map[self.TEST_SERIAL1] = test_dev1
+    self.device_map[self.TEST_SERIAL2] = test_dev2
+    serials = [self.TEST_SERIAL1, self.TEST_SERIAL2]
+    mock_atft._GetSelectedSerials = MagicMock()
+    mock_atft._GetSelectedSerials.return_value = serials
+    mock_atft.atft_manager.atfa_dev = MagicMock()
+    mock_atft._ShowWarning = MagicMock()
+    # User click No for reprovision.
+    mock_atft._ShowWarning.return_value = False
+    mock_atft.OnManualProvision(None)
+    mock_atft.atft_manager.Provision.assert_called_once_with(test_dev1)
+    mock_atft._ShowWarning.assert_called_once()
+
+    # User click yes.
+    mock_atft._ShowWarning.reset_mock()
+    mock_atft.atft_manager.Provision.reset_mock()
+    mock_atft._ShowWarning.return_value = True
+    mock_atft.OnManualProvision(None)
+    calls = [call(test_dev1), call(test_dev2)]
+    mock_atft.atft_manager.Provision.assert_has_calls(calls)
+    mock_atft._ShowWarning.assert_called_once()
 
   def testManualProvisionExceptions(self):
     mock_atft = MockAtft()
@@ -1222,9 +1272,13 @@ class AtftTest(unittest.TestCase):
     self.device_map[self.TEST_SERIAL2] = test_dev2
     self.device_map[self.TEST_SERIAL3] = test_dev3
     serials = [self.TEST_SERIAL1, self.TEST_SERIAL2, self.TEST_SERIAL3]
+    mock_atft._GetSelectedSerials = MagicMock()
+    mock_atft._GetSelectedSerials.return_value = serials
+    mock_atft.atft_manager.atfa_dev = MagicMock()
+    mock_atft._ShowWarning = MagicMock()
     mock_atft.atft_manager.Provision.side_effect = (
         fastboot_exceptions.FastbootFailure(''))
-    mock_atft._ManualProvision(serials)
+    mock_atft.OnManualProvision(None)
     self.assertEqual(2, mock_atft._HandleException.call_count)
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.PROVISION_FAILED)
@@ -1243,10 +1297,11 @@ class AtftTest(unittest.TestCase):
     self.device_map[self.TEST_SERIAL2] = test_dev2
     self.device_map[self.TEST_SERIAL3] = test_dev3
     serials = [self.TEST_SERIAL1, self.TEST_SERIAL2, self.TEST_SERIAL3]
+    mock_atft._GetSelectedSerials.return_value = serials
     mock_atft._HandleException.reset_mock()
     mock_atft.atft_manager.Provision.side_effect = (
         fastboot_exceptions.DeviceNotFoundException())
-    mock_atft._ManualProvision(serials)
+    mock_atft.OnManualProvision(None)
     self.assertEqual(2, mock_atft._HandleException.call_count)
 
   # Test atft._ProcessKey
