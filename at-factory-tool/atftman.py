@@ -153,6 +153,10 @@ class DeviceInfo(object):
     # The number of attestation keys left for the selected product. This
     # attribute is only meaning for ATFA device.
     self.keys_left = None
+    # Only one operation is allowed on one device at one time.
+    self.operation_lock = threading.Lock()
+    # Current operation.
+    self.operation = None
 
   def Copy(self):
     return DeviceInfo(None, self.serial_number, self.location,
