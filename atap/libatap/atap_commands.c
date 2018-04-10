@@ -50,71 +50,69 @@ static AtapResult auth_key_signature_generate(
 }
 
 static AtapResult read_available_public_keys(
-    AtapOps* ops, AtapInnerCaRequest* inner_ca_request) {
+    AtapOps* ops, AtapInnerCaRequestProduct* product_ca_request) {
   AtapResult ret = 0;
 
-  inner_ca_request->RSA_pubkey.data = (uint8_t*)atap_malloc(ATAP_KEY_LEN_MAX);
-  inner_ca_request->RSA_pubkey.data_length = ATAP_KEY_LEN_MAX;
-  inner_ca_request->ECDSA_pubkey.data = (uint8_t*)atap_malloc(ATAP_KEY_LEN_MAX);
-  inner_ca_request->ECDSA_pubkey.data_length = ATAP_KEY_LEN_MAX;
-  inner_ca_request->edDSA_pubkey.data = (uint8_t*)atap_malloc(ATAP_KEY_LEN_MAX);
-  inner_ca_request->edDSA_pubkey.data_length = ATAP_KEY_LEN_MAX;
+  product_ca_request->RSA_pubkey.data = (uint8_t*)atap_malloc(ATAP_KEY_LEN_MAX);
+  product_ca_request->RSA_pubkey.data_length = ATAP_KEY_LEN_MAX;
+  product_ca_request->ECDSA_pubkey.data = (uint8_t*)atap_malloc(ATAP_KEY_LEN_MAX);
+  product_ca_request->ECDSA_pubkey.data_length = ATAP_KEY_LEN_MAX;
+  product_ca_request->edDSA_pubkey.data = (uint8_t*)atap_malloc(ATAP_KEY_LEN_MAX);
+  product_ca_request->edDSA_pubkey.data_length = ATAP_KEY_LEN_MAX;
 
-  if (inner_ca_request->RSA_pubkey.data == NULL ||
-      inner_ca_request->ECDSA_pubkey.data == NULL ||
-      inner_ca_request->edDSA_pubkey.data == NULL) {
+  if (product_ca_request->RSA_pubkey.data == NULL ||
+      product_ca_request->ECDSA_pubkey.data == NULL ||
+      product_ca_request->edDSA_pubkey.data == NULL) {
     return ATAP_RESULT_ERROR_OOM;
   }
   ret = ops->read_attestation_public_key(
       ops,
       ATAP_KEY_TYPE_RSA,
-      inner_ca_request->RSA_pubkey.data,
-      &inner_ca_request->RSA_pubkey.data_length);
+      product_ca_request->RSA_pubkey.data,
+      &product_ca_request->RSA_pubkey.data_length);
   if (ret != ATAP_RESULT_OK) {
     return ret;
   }
   ret = ops->read_attestation_public_key(
       ops,
       ATAP_KEY_TYPE_ECDSA,
-      inner_ca_request->ECDSA_pubkey.data,
-      &inner_ca_request->ECDSA_pubkey.data_length);
+      product_ca_request->ECDSA_pubkey.data,
+      &product_ca_request->ECDSA_pubkey.data_length);
   if (ret != ATAP_RESULT_OK) {
     return ret;
   }
   ret = ops->read_attestation_public_key(
       ops,
       ATAP_KEY_TYPE_edDSA,
-      inner_ca_request->edDSA_pubkey.data,
-      &inner_ca_request->edDSA_pubkey.data_length);
+      product_ca_request->edDSA_pubkey.data,
+      &product_ca_request->edDSA_pubkey.data_length);
   /* edDSA support is not required in the initial version */
   if (ret == ATAP_RESULT_ERROR_UNSUPPORTED_OPERATION) {
-    atap_free(inner_ca_request->edDSA_pubkey.data);
-    inner_ca_request->edDSA_pubkey.data = NULL;
-    inner_ca_request->edDSA_pubkey.data_length = 0;
+    atap_free(product_ca_request->edDSA_pubkey.data);
+    product_ca_request->edDSA_pubkey.data = NULL;
+    product_ca_request->edDSA_pubkey.data_length = 0;
     ret = ATAP_RESULT_OK;
   }
   return ret;
 }
 
-static AtapResult initialize_session(AtapOps* ops,
-                                     const uint8_t* operation_start,
-                                     uint32_t operation_start_size,
-                                     AtapKeyType* auth_key_type,
-                                     uint8_t ca_pubkey[ATAP_ECDH_KEY_LEN],
-                                     AtapCaRequest* ca_request,
-                                     AtapInnerCaRequest* inner_ca_request) {
+static AtapResult initialize_session(
+    AtapOps* ops,
+    const uint8_t* operation_start,
+    uint32_t operation_start_size,
+    AtapKeyType* auth_key_type,
+    uint8_t ca_pubkey[ATAP_ECDH_KEY_LEN],
+    AtapCaRequest* ca_request) {
   uint32_t message_length = 0;
   AtapCurveType curve_type = 0;
   AtapResult ret = 0;
   uint8_t* buf_ptr = (uint8_t*)operation_start + 4;
 
-  atap_memset(ca_request, 0, sizeof(AtapCaRequest));
-  atap_memset(inner_ca_request, 0, sizeof(AtapInnerCaRequest));
-
   if (operation_start_size != ATAP_OPERATION_START_LEN) {
     return ATAP_RESULT_ERROR_INVALID_INPUT;
   }
-  if (operation_start[0] != ATAP_PROTOCOL_VERSION) {
+  if (operation_start[0] != ATAP_PROTOCOL_VERSION &&
+      operation_start[0] != ATAP_PROTOCOL_VERSION_1) {
     return ATAP_RESULT_ERROR_INVALID_INPUT;
   }
   copy_uint32_from_buf(&buf_ptr, &message_length);
@@ -159,24 +157,22 @@ static AtapResult compute_auth_signature(
     AtapOps* ops,
     uint8_t ca_pubkey[ATAP_ECDH_KEY_LEN],
     uint8_t device_pubkey[ATAP_ECDH_KEY_LEN],
-    AtapInnerCaRequest* inner_ca_request) {
+    AtapInnerCaRequestProduct* product_ca_request) {
   AtapResult ret = 0;
   /* read auth key cert chain */
   ret = ops->read_auth_key_cert_chain(ops,
-                                      &inner_ca_request->auth_key_cert_chain);
+                                      &product_ca_request->auth_key_cert_chain);
   if (ret != ATAP_RESULT_OK) {
     return ret;
   }
   /* generate auth key signature */
-  return auth_key_signature_generate(ops,
-                                     device_pubkey,
-                                     ca_pubkey,
-                                     &inner_ca_request->signature.data,
-                                     &inner_ca_request->signature.data_length);
+  return auth_key_signature_generate(
+      ops, device_pubkey, ca_pubkey, &product_ca_request->signature.data,
+      &product_ca_request->signature.data_length);
 }
 
-static AtapResult read_product_id_hash(AtapOps* ops,
-                                       AtapInnerCaRequest* inner_ca_request) {
+static AtapResult read_product_id_hash(
+    AtapOps* ops, AtapInnerCaRequestProduct* product_ca_request) {
   AtapResult ret = 0;
   uint8_t product_id[ATAP_PRODUCT_ID_LEN];
 
@@ -185,18 +181,25 @@ static AtapResult read_product_id_hash(AtapOps* ops,
     return ret;
   }
   return ops->sha256(
-      ops, product_id, ATAP_PRODUCT_ID_LEN, inner_ca_request->product_id_hash);
+      ops, product_id, ATAP_PRODUCT_ID_LEN,
+      product_ca_request->product_id_hash);
 }
 
 static AtapResult encrypt_inner_ca_request(
     AtapOps* ops,
-    const AtapInnerCaRequest* inner_ca_request,
+    const AtapInnerCaRequestProduct* product_ca_request,
+    const AtapInnerCaRequestSom* som_ca_request,
     AtapCaRequest* ca_request) {
   AtapResult ret = 0;
   uint32_t inner_ca_request_len = 0;
   uint8_t* inner_ca_request_buf = NULL;
-
-  inner_ca_request_len = inner_ca_request_serialized_size(inner_ca_request);
+  bool som = is_som_operation(operation);
+  if (som) {
+    inner_ca_request_len = inner_ca_request_som_serialized_size();
+  } else {
+    inner_ca_request_len = inner_ca_request_product_serialized_size(
+        product_ca_request);
+  }
   inner_ca_request_buf = (uint8_t*)atap_malloc(inner_ca_request_len);
   ca_request->encrypted_inner_ca_request.data =
       (uint8_t*)atap_malloc(inner_ca_request_len);
@@ -205,7 +208,12 @@ static AtapResult encrypt_inner_ca_request(
       ca_request->encrypted_inner_ca_request.data == NULL) {
     return ATAP_RESULT_ERROR_OOM;
   }
-  append_inner_ca_request_to_buf(inner_ca_request_buf, inner_ca_request);
+  if (som) {
+    append_inner_ca_request_som_to_buf(inner_ca_request_buf, som_ca_request);
+  } else {
+    append_inner_ca_request_product_to_buf(inner_ca_request_buf,
+                                           product_ca_request);
+  }
 
   /* generate IV */
   ret = ops->get_random_bytes(ops, ca_request->iv, ATAP_GCM_IV_LEN);
@@ -284,7 +292,9 @@ static AtapResult write_attestation_data(AtapOps* ops,
     ret = ATAP_RESULT_ERROR_INVALID_INPUT;
   } else if (key_type != ATAP_KEY_TYPE_edDSA &&
              key_type != ATAP_KEY_TYPE_SPECIAL &&
-             key_type != ATAP_KEY_TYPE_EPID) {
+             key_type != ATAP_KEY_TYPE_EPID &&
+             key_type != ATAP_KEY_TYPE_edDSA_SOM &&
+             key_type != ATAP_KEY_TYPE_EPID_SOM) {
     /* edDSA, EPID, and special purpose key are optional in version 1*/
     ret = ATAP_RESULT_ERROR_INVALID_INPUT;
   }
@@ -300,38 +310,65 @@ static AtapResult write_inner_ca_response(AtapOps* ops,
                                           uint32_t inner_ca_resp_len) {
   AtapResult ret = 0;
   uint8_t** buf_ptr = &inner_ca_resp_ptr;
+  bool som = is_som_operation(operation);
 
   if (!validate_inner_ca_response(
           inner_ca_resp_ptr, inner_ca_resp_len, operation)) {
     return ATAP_RESULT_ERROR_INVALID_INPUT;
   }
-  ret = ops->write_hex_uuid(ops, &inner_ca_resp_ptr[ATAP_HEADER_LEN]);
-  if (ret != ATAP_RESULT_OK) {
-    return ret;
+  if (som) {
+    /* SoM key operation doesn't have hex UUID field. */
+    *buf_ptr += ATAP_HEADER_LEN;
+  } else {
+    ret = ops->write_hex_uuid(ops, &inner_ca_resp_ptr[ATAP_HEADER_LEN]);
+    *buf_ptr += (ATAP_HEADER_LEN + ATAP_HEX_UUID_LEN);
+    if (ret != ATAP_RESULT_OK) {
+      return ret;
+    }
   }
-  *buf_ptr += (ATAP_HEADER_LEN + ATAP_HEX_UUID_LEN);
-  ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_RSA);
-  if (ret != ATAP_RESULT_OK) {
-    return ret;
+  if (som) {
+    ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_RSA_SOM);
+    if (ret != ATAP_RESULT_OK) {
+      return ret;
+    }
+    ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_ECDSA_SOM);
+    if (ret != ATAP_RESULT_OK) {
+      return ret;
+    }
+    ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_edDSA_SOM);
+    /* Device may not support edDSA */
+    if (ret != ATAP_RESULT_OK && ret != ATAP_RESULT_ERROR_UNSUPPORTED_ALGORITHM) {
+      return ret;
+    }
+    ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_EPID_SOM);
+    if (ret != ATAP_RESULT_OK) {
+      return ret;
+    }
+  } else {
+    ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_RSA);
+    if (ret != ATAP_RESULT_OK) {
+      return ret;
+    }
+    ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_ECDSA);
+    if (ret != ATAP_RESULT_OK) {
+      return ret;
+    }
+    ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_edDSA);
+    /* Device may not support edDSA */
+    if (ret != ATAP_RESULT_OK && ret != ATAP_RESULT_ERROR_UNSUPPORTED_ALGORITHM) {
+      return ret;
+    }
+    ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_EPID);
+    if (ret != ATAP_RESULT_OK) {
+      return ret;
+    }
+    /* Device may not support Special Cast key */
+    ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_SPECIAL);
+    if (ret != ATAP_RESULT_OK) {
+      return ret;
+    }
   }
-  ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_ECDSA);
-  if (ret != ATAP_RESULT_OK) {
-    return ret;
-  }
-  ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_edDSA);
-  /* Device may not support edDSA */
-  if (ret != ATAP_RESULT_OK && ret != ATAP_RESULT_ERROR_UNSUPPORTED_ALGORITHM) {
-    return ret;
-  }
-  ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_EPID);
-  if (ret != ATAP_RESULT_OK) {
-    return ret;
-  }
-  /* Device may not support Special Cast key */
-  ret = write_attestation_data(ops, buf_ptr, ATAP_KEY_TYPE_SPECIAL);
-  if (ret != ATAP_RESULT_OK) {
-    return ret;
-  }
+
   return ATAP_RESULT_OK;
 }
 
@@ -343,7 +380,12 @@ AtapResult atap_get_ca_request(AtapOps* ops,
   AtapResult ret = 0;
   AtapKeyType auth_key_type = 0;
   AtapCaRequest ca_request;
-  AtapInnerCaRequest inner_ca_request;
+  AtapInnerCaRequestProduct inner_ca_request_product;
+  AtapInnerCaRequestSom inner_ca_request_som;
+  atap_memset(&ca_request, 0, sizeof(AtapCaRequest));
+  atap_memset(&inner_ca_request_product, 0, sizeof(AtapInnerCaRequestProduct));
+  atap_memset(&inner_ca_request_som, 0, sizeof(AtapInnerCaRequestSom));
+
   uint8_t ca_pubkey[ATAP_ECDH_KEY_LEN];
 
   ret = initialize_session(ops,
@@ -351,37 +393,39 @@ AtapResult atap_get_ca_request(AtapOps* ops,
                            operation_start_size,
                            &auth_key_type,
                            ca_pubkey,
-                           &ca_request,
-                           &inner_ca_request);
+                           &ca_request);
+  bool som = is_som_operation(operation);
   if (ret != ATAP_RESULT_OK) {
     goto err;
   }
+  if (!som) {
+    if (auth_key_type != ATAP_KEY_TYPE_NONE) {
+      ret = compute_auth_signature(
+          ops, ca_pubkey, ca_request.device_pubkey, &inner_ca_request_product);
+      if (ret != ATAP_RESULT_OK) {
+        goto err;
+      }
+    }
 
-  if (auth_key_type != ATAP_KEY_TYPE_NONE) {
-    ret = compute_auth_signature(
-        ops, ca_pubkey, ca_request.device_pubkey, &inner_ca_request);
+    if (operation == ATAP_OPERATION_CERTIFY) {
+      ret = read_available_public_keys(ops, &inner_ca_request_product);
+      if (ret != ATAP_RESULT_OK) {
+        goto err;
+      }
+    }
+    ret = read_product_id_hash(ops, &inner_ca_request_product);
     if (ret != ATAP_RESULT_OK) {
       goto err;
     }
+  } else{
+    // TODO: Set SOM ID hash (b/78599492)
   }
 
-  if (operation == ATAP_OPERATION_CERTIFY) {
-    ret = read_available_public_keys(ops, &inner_ca_request);
-    if (ret != ATAP_RESULT_OK) {
-      goto err;
-    }
-  }
-
-  ret = read_product_id_hash(ops, &inner_ca_request);
+  ret = encrypt_inner_ca_request(
+      ops, &inner_ca_request_product, &inner_ca_request_som, &ca_request);
   if (ret != ATAP_RESULT_OK) {
     goto err;
   }
-
-  ret = encrypt_inner_ca_request(ops, &inner_ca_request, &ca_request);
-  if (ret != ATAP_RESULT_OK) {
-    goto err;
-  }
-
   *ca_request_size_p = ca_request_serialized_size(&ca_request);
   *ca_request_p = (uint8_t*)atap_malloc(*ca_request_size_p);
   if (*ca_request_p == NULL) {
@@ -399,8 +443,8 @@ err:
   *ca_request_p = NULL;
   *ca_request_size_p = 0;
 out:
-  free_inner_ca_request(inner_ca_request);
-  free_ca_request(ca_request);
+  free_inner_ca_request_product(&inner_ca_request_product);
+  free_ca_request(&ca_request);
   return ret;
 }
 
@@ -425,7 +469,8 @@ AtapResult atap_set_ca_response(AtapOps* ops,
     goto out;
   }
   inner_ca_resp_ptr = inner_ca_resp;
-  if (operation == ATAP_OPERATION_ISSUE_ENCRYPTED) {
+  if (operation == ATAP_OPERATION_ISSUE_ENCRYPTED ||
+      operation == ATAP_OPERATION_ISSUE_ENCRYPTED_SOM_KEY) {
     /* Decrypt Encrypted Inner CA Response (encrypted) with SoC global key */
     ret = ops->read_soc_global_key(ops, soc_global_key);
     if (ret != ATAP_RESULT_OK) {

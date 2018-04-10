@@ -136,6 +136,9 @@ extern "C" {
     atap_abort();                         \
   } while (0)
 
+/* Return whether current operation is a SoM key operation. */
+bool is_som_operation(AtapOperation operation);
+
 /* Returns the basename of |str|. This is defined as the last path
  * component, assuming the normal POSIX separator '/'. If there are no
  * separators, returns |str|.
@@ -153,8 +156,10 @@ uint8_t* append_cert_chain_to_buf(uint8_t* buf,
                                   const AtapCertChain* cert_chain);
 uint8_t* append_ca_request_to_buf(uint8_t* buf,
                                   const AtapCaRequest* ca_request);
-uint8_t* append_inner_ca_request_to_buf(
-    uint8_t* buf, const AtapInnerCaRequest* inner_ca_request);
+uint8_t* append_inner_ca_request_product_to_buf(
+    uint8_t* buf, const AtapInnerCaRequestProduct* product_ca_request);
+uint8_t* append_inner_ca_request_som_to_buf(
+    uint8_t* buf, const AtapInnerCaRequestSom* som_ca_request);
 
 /* These copy serialized data from |*buf_ptr| to the output structure, and
  * increment |*buf_ptr| by [number of bytes copied]. Returns true on success,
@@ -166,19 +171,22 @@ bool copy_blob_from_buf(uint8_t** buf_ptr, AtapBlob* blob);
 bool copy_cert_chain_from_buf(uint8_t** buf_ptr, AtapCertChain* cert_chain);
 
 /* Returns the serialized size of structures. For AtapCaRequest and
- * AtapInnerCaRequest, this includes the header.
+ * AtapInnerCaRequestProduct, this includes the header. AtapInnerCaRequestSom
+ * is constant size, thus no need to calculate size for that.
  */
 uint32_t blob_serialized_size(const AtapBlob* blob);
 uint32_t cert_chain_serialized_size(const AtapCertChain* cert_chain);
 uint32_t ca_request_serialized_size(const AtapCaRequest* ca_request);
-uint32_t inner_ca_request_serialized_size(
-    const AtapInnerCaRequest* inner_ca_request);
+uint32_t inner_ca_request_product_serialized_size(
+    const AtapInnerCaRequestProduct* product_ca_request);
+uint32_t inner_ca_request_som_serialized_size(void);
 
 /* Frees all data allocated for a structure. */
 void free_blob(AtapBlob blob);
 void free_cert_chain(AtapCertChain cert_chain);
-void free_inner_ca_request(AtapInnerCaRequest inner_ca_request);
-void free_ca_request(AtapCaRequest ca_request);
+void free_inner_ca_request_product(
+    AtapInnerCaRequestProduct* product_ca_request);
+void free_ca_request(AtapCaRequest* ca_request);
 
 /* These return true if the inputs are valid. For complicated message
  * structures, each expected field is parsed and validated.

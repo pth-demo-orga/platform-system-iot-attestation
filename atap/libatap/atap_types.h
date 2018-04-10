@@ -63,8 +63,12 @@ typedef enum {
   ATAP_KEY_TYPE_ECDSA = 2,
   ATAP_KEY_TYPE_edDSA = 3,
   ATAP_KEY_TYPE_EPID = 4,
-  ATAP_KEY_TYPE_SPECIAL = 5 /* in protocol v1, this is always the "cast" key
+  ATAP_KEY_TYPE_SPECIAL = 5, /* in protocol v1, this is always the "cast" key
                              * persisted by the TEE */
+  ATAP_KEY_TYPE_RSA_SOM = 1  | 0x1000,
+  ATAP_KEY_TYPE_ECDSA_SOM = 2 | 0x1000,
+  ATAP_KEY_TYPE_edDSA_SOM = 3 | 0x1000,
+  ATAP_KEY_TYPE_EPID_SOM = 4 | 0x1000,
 } AtapKeyType;
 
 typedef enum {
@@ -77,10 +81,14 @@ typedef enum {
   ATAP_OPERATION_NONE = 0,
   ATAP_OPERATION_CERTIFY = 1,
   ATAP_OPERATION_ISSUE = 2,
-  ATAP_OPERATION_ISSUE_ENCRYPTED = 3
+  ATAP_OPERATION_ISSUE_ENCRYPTED = 3,
+  ATAP_OPERATION_ISSUE_SOM_KEY = 4,
+  ATAP_OPERATION_ISSUE_ENCRYPTED_SOM_KEY = 5
 } AtapOperation;
 
-#define ATAP_PROTOCOL_VERSION 1
+/* Version 2 adds SoM key support */
+#define ATAP_PROTOCOL_VERSION 2
+#define ATAP_PROTOCOL_VERSION_1 1
 #define ATAP_HEADER_LEN 8
 #define ATAP_ECDH_KEY_LEN 33
 #define ATAP_ECDH_SHARED_SECRET_LEN 32
@@ -98,7 +106,8 @@ typedef enum {
 #define ATAP_BLOB_LEN_MAX ATAP_CERT_CHAIN_LEN_MAX
 #define ATAP_SIGNATURE_LEN_MAX 512
 #define ATAP_HEX_UUID_LEN 32
-#define ATAP_INNER_CA_RESPONSE_FIELDS 10
+#define ATAP_INNER_CA_RESPONSE_FIELDS_PRODUCT 10
+#define ATAP_INNER_CA_RESPONSE_FIELDS_SOM 8
 
 typedef struct {
   uint8_t* data;
@@ -118,7 +127,12 @@ typedef struct {
   AtapBlob RSA_pubkey;
   AtapBlob ECDSA_pubkey;
   AtapBlob edDSA_pubkey;
-} AtapInnerCaRequest;
+} AtapInnerCaRequestProduct;
+
+typedef struct {
+  uint8_t header[ATAP_HEADER_LEN];
+  uint8_t som_id_hash[ATAP_SHA256_DIGEST_LEN];
+} AtapInnerCaRequestSom;
 
 typedef struct {
   uint8_t header[ATAP_HEADER_LEN];
