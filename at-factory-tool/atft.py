@@ -858,9 +858,8 @@ class Atft(wx.Frame):
     if not self.log.log_dir_file:
       self._SendAlertEvent(self.ALERT_FAIL_TO_CREATE_LOG)
 
-    self.StartRefreshingDevices()
-
     self.ShowStartScreen()
+    self.StartRefreshingDevices()
 
   def CreateAtftManager(self):
     """Create an AtftManager object.
@@ -1230,6 +1229,12 @@ class Atft(wx.Frame):
     self.ALERT_WRONG_ORIG_PASSWORD = [
         'Wrong Original Password!!!',
         '原密码错误!!!'][index]
+    self.ALERT_REPROVISION = [
+        lambda device:
+            'The device ' + str(device) + ' already has attestation key, '
+            'do you want to reprovision a new key?',
+        lambda device:
+            '设备' + str(device) + '中已经有一个密钥，是否覆盖？'][index]
 
     self.STATUS_MAPPED = ['Mapped', '已关联位置'][index]
     self.STATUS_NOT_MAPPED = ['Not mapped', '未关联位置'][index]
@@ -1718,7 +1723,7 @@ class Atft(wx.Frame):
       target_devs_output_serial = wx.StaticText(
           target_devs_output_title, wx.ID_ANY, '')
       target_devs_output_serial.SetForegroundColour(self.COLOR_BLACK)
-      target_devs_output_serial.SetMinSize((180 * scale, 0))
+      target_devs_output_serial.SetMinSize((180 * scale, 15))
       target_devs_output_title_sizer.Add(
           target_devs_output_serial, 0, wx.TOP, 18)
       serial_font = wx.Font(
@@ -2002,6 +2007,23 @@ class Atft(wx.Frame):
     if self._GetCachedATFAKeysLeft() == 0:
       self._SendAlertEvent(self.ALERT_PROV_NO_KEYS)
       return
+    for serial in selected_serials:
+      target_dev = self.atft_manager.GetTargetDevice(serial)
+      if not target_dev:
+        continue
+      status = target_dev.provision_status
+      if (TEST_MODE):
+        target_dev.provision_status = ProvisionStatus.WAITING
+      elif (
+          target_dev.provision_state.bootloader_locked and
+          target_dev.provision_state.avb_perm_attr_set and
+          target_dev.provision_state.avb_locked):
+        if (target_dev.provision_state.provisioned and
+            not self._ShowWarning(self.ALERT_REPROVISION(target_dev))):
+          continue
+        target_dev.provision_status = ProvisionStatus.WAITING
+      else:
+        self._SendAlertEvent(self.ALERT_PROV_PROVED)
     self._CreateThread(self._ManualProvision, selected_serials)
 
   def OnCheckATFAStatus(self, event):
@@ -2698,7 +2720,6 @@ class Atft(wx.Frame):
             serial_text = (
                 self.FIELD_SERIAL_NUMBER + ': ' + str(serial_number))
             status = target_dev.provision_status
-
       self._ShowTargetDevice(i, serial_number, serial_text, status)
 
   def _ShowTargetDevice(self, i, serial_number, serial_text, status):
@@ -3189,25 +3210,12 @@ class Atft(wx.Frame):
     # Reset alert_shown
     self.first_key_alert_shown = False
     self.second_key_alert_shown = False
-    pending_targets = []
     for serial in selected_serials:
       target_dev = self.atft_manager.GetTargetDevice(serial)
       if not target_dev:
         continue
-      pending_targets.append(target_dev)
-      status = target_dev.provision_status
-      if (TEST_MODE or (
-          target_dev.provision_state.bootloader_locked and
-          target_dev.provision_state.avb_perm_attr_set and
-          target_dev.provision_state.avb_locked and
-          not target_dev.provision_state.provisioned
-        )):
-        target_dev.provision_status = ProvisionStatus.WAITING
-      else:
-        self._SendAlertEvent(self.ALERT_PROV_PROVED)
-    for target in pending_targets:
-      if target.provision_status == ProvisionStatus.WAITING:
-        self._ProvisionTarget(target)
+      if target_dev.provision_status == ProvisionStatus.WAITING:
+        self._ProvisionTarget(target_dev)
 
   def _ProvisionTarget(self, target):
     """Provision the attestation key into the specific target.
