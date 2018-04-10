@@ -68,6 +68,8 @@ class TestDeviceInfo(object):
     self.provision_status = provision_status
     self.provision_state = ProvisionState()
     self.time_set = False
+    self.operation_lock = MagicMock()
+    self.operation = None
 
   def __eq__(self, other):
     return (self.serial_number == other.serial_number and
