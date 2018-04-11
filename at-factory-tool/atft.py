@@ -3242,6 +3242,9 @@ class Atft(wx.Frame):
       self._EndOperation(target)
 
     self._SendOperationSucceedEvent(operation, target)
+    self.log.Info(
+      'Key Provisioning',
+      'Device: ' + str(target) + ' AT-ATTEST-UUID: ' + target.at_attest_uuid)
     self._CheckLowKeyAlert()
 
   def _HandleStateTransition(self, target):
