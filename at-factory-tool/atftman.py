@@ -157,6 +157,8 @@ class DeviceInfo(object):
     self.operation_lock = threading.Lock()
     # Current operation.
     self.operation = None
+    # The at-attest-uuid for the provisioned key in this device.
+    self.at_attest_uuid = None
 
   def Copy(self):
     return DeviceInfo(None, self.serial_number, self.location,
@@ -544,6 +546,7 @@ class AtftManager(object):
     # TODO(shanyu): We only need empty string here
     # NOT_PROVISIONED is for test purpose.
     if at_attest_uuid and at_attest_uuid != 'NOT_PROVISIONED':
+      target_dev.at_attest_uuid = at_attest_uuid
       target_dev.provision_status = ProvisionStatus.PROVISION_SUCCESS
       status_set = True
       target_dev.provision_state.provisioned = True
