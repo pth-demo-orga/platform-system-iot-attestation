@@ -70,6 +70,7 @@ class TestDeviceInfo(object):
     self.time_set = False
     self.operation_lock = MagicMock()
     self.operation = None
+    self.at_attest_uuid = None
 
   def __eq__(self, other):
     return (self.serial_number == other.serial_number and
@@ -98,6 +99,7 @@ class AtftTest(unittest.TestCase):
   TEST_PASSWORD1 = 'password 1'
   TEST_PASSWORD2 = 'PassWord 2!'
   TEST_FILENAME = 'filename'
+  TEST_ATTEST_UUID = 'test attest uuid'
 
   def setUp(self):
     self.test_target_devs = []
@@ -1025,6 +1027,7 @@ class AtftTest(unittest.TestCase):
 
   def MockSuccessProvision(self, target):
     self.atfa_keys -= 1
+    self.MockSetAttestUuid(target)
 
   def MockFailedProvision(self, target):
     pass
@@ -1159,6 +1162,9 @@ class AtftTest(unittest.TestCase):
     mock_atft._Shutdown()
     mock_atft._HandleException.assert_called_once()
 
+  def MockSetAttestUuid(self, target):
+    target.at_attest_uuid = self.TEST_ATTEST_UUID
+
   # Test atft._ManualProvision
   def testManualProvision(self):
     mock_atft = MockAtft()
@@ -1168,6 +1174,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendSucceedMessageEvent = MagicMock()
     mock_atft._HandleException = MagicMock()
     mock_atft.atft_manager.Provision = MagicMock()
+    mock_atft.atft_manager.Provision.side_effect = self.MockSetAttestUuid
     mock_atft._SendAlertEvent = MagicMock()
     mock_atft._CheckLowKeyAlert = MagicMock()
     mock_atft.atft_manager.GetTargetDevice.side_effect = (
@@ -1206,6 +1213,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendSucceedMessageEvent = MagicMock()
     mock_atft._HandleException = MagicMock()
     mock_atft.atft_manager.Provision = MagicMock()
+    mock_atft.atft_manager.Provision.side_effect = self.MockSetAttestUuid
     mock_atft._SendAlertEvent = MagicMock()
     mock_atft._CheckLowKeyAlert = MagicMock()
     mock_atft.atft_manager.GetTargetDevice.side_effect = (
@@ -1251,6 +1259,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendSucceedMessageEvent = MagicMock()
     mock_atft._HandleException = MagicMock()
     mock_atft.atft_manager.Provision = MagicMock()
+    mock_atft.atft_manager.Provision.side_effect = self.MockSetAttestUuid
     mock_atft._SendAlertEvent = MagicMock()
     mock_atft._CheckLowKeyAlert = MagicMock()
     mock_atft.atft_manager.GetTargetDevice.side_effect = (
