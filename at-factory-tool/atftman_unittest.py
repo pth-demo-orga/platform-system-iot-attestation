@@ -104,6 +104,7 @@ class AtftManTest(unittest.TestCase):
     self.configs['ATFA_REBOOT_TIMEOUT'] = 30
     self.configs['DEFAULT_KEY_THRESHOLD'] = 100
     self.configs['COMPATIBLE_ATFA_VERSION'] = 10
+    self.configs['UNLOCK_CREDENTIAL'] = None
 
   # Test ProvisionStatus
   def GetAllProvisionStatus(self):
@@ -123,7 +124,10 @@ class AtftManTest(unittest.TestCase):
             ProvisionStatus.LOCKAVB_FAILED,
             ProvisionStatus.PROVISION_ING,
             ProvisionStatus.PROVISION_SUCCESS,
-            ProvisionStatus.PROVISION_FAILED]
+            ProvisionStatus.PROVISION_FAILED,
+            ProvisionStatus.UNLOCKAVB_ING,
+            ProvisionStatus.UNLOCKAVB_SUCCESS,
+            ProvisionStatus.UNLOCKAVB_FAILED]
 
   def testProvisionStatus(self):
     status_list = self.GetAllProvisionStatus()
@@ -1255,6 +1259,61 @@ class AtftManTest(unittest.TestCase):
       atft_manager.LockAvb(mock_target)
     self.assertEqual(
         ProvisionStatus.LOCKAVB_FAILED, mock_target.provision_status)
+
+  # Test AtftManager.LockAvb
+  def MockSetUnlockAvbSuccess(self, target):
+    target.provision_status = ProvisionStatus.UNLOCKAVB_SUCCESS
+    target.provision_state = ProvisionState()
+    target.provision_state.avb_locked = False
+
+  def MockSetUnlockAvbFail(self, target):
+    target.provision_status = ProvisionStatus.UNLOCKAVB_FAILED
+    target.provision_state = ProvisionState()
+    target.provision_state.avb_locked = True
+
+  def testUnlockAvb(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_target = MagicMock()
+    atft_manager.CheckProvisionStatus = MagicMock()
+    atft_manager.CheckProvisionStatus.side_effect = self.MockSetUnlockAvbSuccess
+    atft_manager.UnlockAvb(mock_target)
+    mock_target.Oem.assert_called_once_with('at-unlock-vboot')
+    self.assertEqual(
+        ProvisionStatus.UNLOCKAVB_SUCCESS, mock_target.provision_status)
+
+  def testUnlockAvbWithCredential(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_target = MagicMock()
+    atft_manager.CheckProvisionStatus = MagicMock()
+    atft_manager.CheckProvisionStatus.side_effect = self.MockSetUnlockAvbSuccess
+    atft_manager.UNLOCK_CREDENTIAL = 'test'
+    atft_manager.UnlockAvb(mock_target)
+    mock_target.Oem.assert_called_once_with('at-unlock-vboot test')
+    self.assertEqual(
+        ProvisionStatus.UNLOCKAVB_SUCCESS, mock_target.provision_status)
+
+  def testUnlockAvbFail(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_target = MagicMock()
+    atft_manager.CheckProvisionStatus = MagicMock()
+    atft_manager.CheckProvisionStatus.side_effect = self.MockSetUnlockAvbFail
+    with self.assertRaises(FastbootFailure):
+      atft_manager.UnlockAvb(mock_target)
+
+  def testUnlockAvbFastbootFailure(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_target = MagicMock()
+    atft_manager.CheckProvisionStatus = MagicMock()
+    atft_manager.CheckProvisionStatus.side_effect = self.MockSetUnlockAvbSuccess
+    mock_target.Oem.side_effect = FastbootFailure('')
+    with self.assertRaises(FastbootFailure):
+      atft_manager.UnlockAvb(mock_target)
+    self.assertEqual(
+        ProvisionStatus.UNLOCKAVB_FAILED, mock_target.provision_status)
 
   # Test AtftManager.Reboot
   class MockTimer(object):
