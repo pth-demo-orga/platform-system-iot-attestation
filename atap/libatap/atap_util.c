@@ -18,6 +18,12 @@
 
 #include "atap_ops.h"
 
+bool is_som_operation(AtapOperation operation) {
+  return (
+      operation == ATAP_OPERATION_ISSUE_SOM_KEY ||
+      operation == ATAP_OPERATION_ISSUE_ENCRYPTED_SOM_KEY);
+}
+
 const char* atap_basename(const char* str) {
   int64_t n = 0;
   size_t len = atap_strlen(str);
@@ -85,19 +91,26 @@ uint8_t* append_ca_request_to_buf(uint8_t* buf,
   return append_to_buf(buf, ca_request->tag, ATAP_GCM_TAG_LEN);
 }
 
-uint8_t* append_inner_ca_request_to_buf(
-    uint8_t* buf, const AtapInnerCaRequest* inner_ca_request) {
+uint8_t* append_inner_ca_request_product_to_buf(
+    uint8_t* buf, const AtapInnerCaRequestProduct* product_ca_request) {
   uint32_t inner_ca_request_len =
-      inner_ca_request_serialized_size(inner_ca_request);
+      inner_ca_request_product_serialized_size(product_ca_request);
 
   buf = append_header_to_buf(buf, inner_ca_request_len - ATAP_HEADER_LEN);
-  buf = append_cert_chain_to_buf(buf, &inner_ca_request->auth_key_cert_chain);
-  buf = append_blob_to_buf(buf, &inner_ca_request->signature);
+  buf = append_cert_chain_to_buf(buf, &product_ca_request->auth_key_cert_chain);
+  buf = append_blob_to_buf(buf, &product_ca_request->signature);
   buf = append_to_buf(
-      buf, inner_ca_request->product_id_hash, ATAP_SHA256_DIGEST_LEN);
-  buf = append_blob_to_buf(buf, &inner_ca_request->RSA_pubkey);
-  buf = append_blob_to_buf(buf, &inner_ca_request->ECDSA_pubkey);
-  return append_blob_to_buf(buf, &inner_ca_request->edDSA_pubkey);
+      buf, product_ca_request->product_id_hash, ATAP_SHA256_DIGEST_LEN);
+  buf = append_blob_to_buf(buf, &product_ca_request->RSA_pubkey);
+  buf = append_blob_to_buf(buf, &product_ca_request->ECDSA_pubkey);
+  return append_blob_to_buf(buf, &product_ca_request->edDSA_pubkey);
+}
+
+uint8_t* append_inner_ca_request_som_to_buf(
+    uint8_t* buf, const AtapInnerCaRequestSom* som_ca_request) {
+  buf = append_header_to_buf(buf, ATAP_SHA256_DIGEST_LEN);
+ return append_to_buf(
+      buf, som_ca_request->som_id_hash, ATAP_SHA256_DIGEST_LEN);
 }
 
 void copy_from_buf(uint8_t** buf_ptr, void* data, uint32_t data_size) {
@@ -183,16 +196,22 @@ uint32_t ca_request_serialized_size(const AtapCaRequest* ca_request) {
   return size;
 }
 
-uint32_t inner_ca_request_serialized_size(
-    const AtapInnerCaRequest* inner_ca_request) {
+uint32_t inner_ca_request_product_serialized_size(
+    const AtapInnerCaRequestProduct* product_ca_request) {
+
   uint32_t size = ATAP_HEADER_LEN + ATAP_SHA256_DIGEST_LEN;
 
-  size += cert_chain_serialized_size(&inner_ca_request->auth_key_cert_chain);
-  size += blob_serialized_size(&inner_ca_request->signature);
-  size += blob_serialized_size(&inner_ca_request->RSA_pubkey);
-  size += blob_serialized_size(&inner_ca_request->ECDSA_pubkey);
-  size += blob_serialized_size(&inner_ca_request->edDSA_pubkey);
+  size += cert_chain_serialized_size(
+      &product_ca_request->auth_key_cert_chain);
+  size += blob_serialized_size(&product_ca_request->signature);
+  size += blob_serialized_size(&product_ca_request->RSA_pubkey);
+  size += blob_serialized_size(&product_ca_request->ECDSA_pubkey);
+  size += blob_serialized_size(&product_ca_request->edDSA_pubkey);
   return size;
+}
+
+uint32_t inner_ca_request_som_serialized_size() {
+    return sizeof(AtapInnerCaRequestSom);
 }
 
 void free_blob(AtapBlob blob) {
@@ -214,22 +233,27 @@ void free_cert_chain(AtapCertChain cert_chain) {
   atap_memset(&cert_chain, 0, sizeof(AtapCertChain));
 }
 
-void free_ca_request(AtapCaRequest ca_request) {
-  free_blob(ca_request.encrypted_inner_ca_request);
+void free_ca_request(AtapCaRequest* ca_request) {
+  free_blob(ca_request->encrypted_inner_ca_request);
+  atap_memset(ca_request, 0, sizeof(AtapCaRequest));
 }
 
-void free_inner_ca_request(AtapInnerCaRequest inner_ca_request) {
-  free_cert_chain(inner_ca_request.auth_key_cert_chain);
-  free_blob(inner_ca_request.signature);
-  free_blob(inner_ca_request.RSA_pubkey);
-  free_blob(inner_ca_request.ECDSA_pubkey);
-  free_blob(inner_ca_request.edDSA_pubkey);
+void free_inner_ca_request_product(
+    AtapInnerCaRequestProduct* product_ca_request) {
+  free_cert_chain(product_ca_request->auth_key_cert_chain);
+  free_blob(product_ca_request->signature);
+  free_blob(product_ca_request->RSA_pubkey);
+  free_blob(product_ca_request->ECDSA_pubkey);
+  free_blob(product_ca_request->edDSA_pubkey);
+  atap_memset(product_ca_request, 0, sizeof(AtapInnerCaRequestProduct));
 }
 
 bool validate_operation(AtapOperation operation) {
   if (operation != ATAP_OPERATION_CERTIFY &&
       operation != ATAP_OPERATION_ISSUE &&
-      operation != ATAP_OPERATION_ISSUE_ENCRYPTED) {
+      operation != ATAP_OPERATION_ISSUE_ENCRYPTED &&
+      operation != ATAP_OPERATION_ISSUE_SOM_KEY &&
+      operation != ATAP_OPERATION_ISSUE_ENCRYPTED_SOM_KEY) {
     return false;
   }
   return true;
@@ -250,7 +274,7 @@ bool validate_encrypted_message(const uint8_t* buf, uint32_t buf_size) {
       ATAP_HEADER_LEN + ATAP_GCM_IV_LEN + sizeof(uint32_t) + ATAP_GCM_TAG_LEN) {
     return false;
   }
-  if (buf[0] != ATAP_PROTOCOL_VERSION) {
+  if (buf[0] != ATAP_PROTOCOL_VERSION && buf[0] != ATAP_PROTOCOL_VERSION_1) {
     return false;
   }
   buf_ptr += 4;
@@ -274,12 +298,28 @@ bool validate_inner_ca_response(const uint8_t* buf,
   size_t i = 0;
   int tmp = 0;
   uint8_t* buf_ptr = (uint8_t*)buf;
+  uint32_t inner_ca_response_fields = 0;
+  uint32_t min_size = 0;
+  bool som = is_som_operation(operation);
 
-  if (buf_size < ATAP_HEADER_LEN + ATAP_HEX_UUID_LEN +
-                     ATAP_INNER_CA_RESPONSE_FIELDS * sizeof(uint32_t)) {
+  if (!som) {
+    min_size += ATAP_HEX_UUID_LEN;
+    inner_ca_response_fields = ATAP_INNER_CA_RESPONSE_FIELDS_PRODUCT;
+  } else {
+    inner_ca_response_fields = ATAP_INNER_CA_RESPONSE_FIELDS_SOM;
+  }
+
+  min_size += ATAP_HEADER_LEN + inner_ca_response_fields * sizeof(uint32_t);
+
+  if (buf_size < min_size) {
     return false;
   }
-  if (buf[0] != ATAP_PROTOCOL_VERSION) {
+  if (buf[0] != ATAP_PROTOCOL_VERSION &&
+      buf[0] != ATAP_PROTOCOL_VERSION_1) {
+    return false;
+  }
+  if (buf[0] == ATAP_PROTOCOL_VERSION_1 && som) {
+    /* Legacy version protocol doesn't support som key operation. */
     return false;
   }
   buf_ptr += 4;
@@ -287,14 +327,17 @@ bool validate_inner_ca_response(const uint8_t* buf,
   if (len != buf_size - ATAP_HEADER_LEN) {
     return false;
   }
-  buf_ptr += ATAP_HEX_UUID_LEN;
-  for (i = 0; i < ATAP_INNER_CA_RESPONSE_FIELDS; ++i) {
+
+  if (!som) {
+    buf_ptr += ATAP_HEX_UUID_LEN;
+  }
+  for (i = 0; i < inner_ca_response_fields; ++i) {
     /* Odd indices are private keys */
     if (i % 2) {
       copy_uint32_from_buf(&buf_ptr, &len);
       /* Product keys (non special purpose) are omitted on certify operation. */
       if (operation == ATAP_OPERATION_CERTIFY &&
-          i != ATAP_INNER_CA_RESPONSE_FIELDS - 1 && len != 0) {
+          i != inner_ca_response_fields - 1 && len != 0) {
         return false;
       }
       if (len > ATAP_KEY_LEN_MAX) {

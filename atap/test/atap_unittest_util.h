@@ -58,11 +58,18 @@ const char kCaX25519PrivateKey[] = "test/data/ca_x25519_private.bin";
 const char kCaX25519PublicKey[] = "test/data/ca_x25519_public.bin";
 const char kIssueP256OperationStartPath[] =
     "test/data/issue_p256_operation_start.bin";
+const char kIssueP256SomOperationStartPath[] =
+    "test/data/issue_p256_som_operation_start.bin";
 const char kIssueX25519InnerCaResponsePath[] =
     "test/data/issue_x25519_inner_ca_response.bin";
 const char kIssueX25519OperationStartPath[] =
     "test/data/issue_x25519_operation_start.bin";
+const char kIssueX25519SomOperationStartPath[] =
+    "test/data/issue_x25519_som_operation_start.bin";
 const char kProductIdHash[] = "test/data/product_id_hash.bin";
+const char kSomIdHash[] = "test/data/som_id_hash.bin";
+const char kAuthSig[] = "test/data/auth_sig.bin";
+const char kAuthCert[] = "test/data/auth_cert.bin";
 
 // Returns |buf| + |*index|, then increments |*index| by |value|. Used for
 // validating the contents of a serialized structure.

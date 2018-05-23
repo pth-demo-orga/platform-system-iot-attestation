@@ -61,6 +61,16 @@ class FakeAtapOps : public OpensslOps {
                            uint32_t nonce_len,
                            uint8_t sig[ATAP_SIGNATURE_LEN_MAX],
                            uint32_t* sig_len) override;
+  void set_auth(
+    const AtapKeyType key_type, uint8_t* sig, uint32_t sig_len, uint8_t* cert,
+    uint32_t cert_len);
+
+ private:
+  AtapKeyType key_type_ = ATAP_KEY_TYPE_NONE;
+  uint32_t auth_sig_len_ = 0;
+  uint8_t *auth_sig_ = nullptr;
+  uint32_t auth_cert_len_ = 0;
+  uint8_t *auth_cert_ = nullptr;
 };
 
 }  // namespace atap
