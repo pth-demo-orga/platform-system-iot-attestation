@@ -23,9 +23,9 @@ Appliance (ATFA).
 """
 
 import argparse
-from collections import namedtuple
 import os
 import struct
+import subprocess
 
 from aesgcm import AESGCM
 import cryptography.exceptions
@@ -35,19 +35,43 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import curve25519
 import ec_helper
 
-_ATAPSessionParameters = namedtuple('_AtapSessionParameters', [
-    'algorithm', 'operation', 'private_key', 'public_key'
-])
 
-_MESSAGE_VERSION = 1
-_OPERATIONS = {'ISSUE': 2, 'ISSUE_ENC': 3}
+class _AtapSessionParameters(object):
+
+  def __init__(self):
+    self.algorithm = 0
+    self.operation = 0
+    self.private_key = bytes()
+    self.public_key = bytes()
+    self.device_pub_key = bytes()
+    self.shared_key = bytes()
+    self.auth_value = bytes()
+    self.message_version = None
+
+
+# Version 2 adds SoM key suppport but is otherwise compatible with version 1.
+_MESSAGE_VERSION_1 = 1
+_MESSAGE_VERSION_2 = 2
+_OPERATIONS = {'ISSUE': 2, 'ISSUE_ENC': 3, 'ISSUE_SOM': 4, 'ISSUE_ENC_SOM': 5}
 _ALGORITHMS = {'p256': 1, 'x25519': 2}
 _ECDH_KEY_LEN = 33
+_VAR_LEN = 4
+_HEADER_LEN = 8
+_GCM_IV_LEN = 12
+_GCM_TAG_LEN = 16
+_HASH_LEN = 32
+_HKDF_HASH_LEN = 16
 
-_session_params = _ATAPSessionParameters(0, 0, bytes(), bytes())
+
+def _get_message_version(session_params):
+  operation = session_params.operation
+  if ((operation == _OPERATIONS['ISSUE_SOM']) or
+      (operation == _OPERATIONS['ISSUE_ENC_SOM'])):
+    return _MESSAGE_VERSION_2
+  return _MESSAGE_VERSION_1
 
 
-def _write_operation_start(algorithm, operation):
+def _write_operation_start(algorithm, operation, message_version):
   """Writes a fresh Operation Start message to tmp/operation_start.bin.
 
   Generates an ECDHE key specified by <algorithm> and writes an Operation
@@ -57,17 +81,19 @@ def _write_operation_start(algorithm, operation):
     algorithm: Integer specifying the curve to use for the session key.
         1: P256, 2: X25519
     operation: Specifies the operation. 1: Certify, 2: Issue, 3: Issue Encrypted
+    message_version: The ATAP version. If message_version is None, than we
+      select the default version according to the operation.
 
   Raises:
     ValueError: algorithm or operation is is invalid.
+  Returns:
+    session_params: The session information.
   """
-
-  global _session_params
 
   if algorithm > 2 or algorithm < 1:
     raise ValueError('Invalid algorithm value.')
 
-  if operation > 3 or operation < 1:
+  if operation > 5 or operation < 1:
     raise ValueError('Invalid operation value.')
 
   # Generate new key for each provisioning session
@@ -78,12 +104,19 @@ def _write_operation_start(algorithm, operation):
   elif algorithm == _ALGORITHMS['p256']:
     [private_key, public_key] = ec_helper.generate_p256_key()
 
-  _session_params = _ATAPSessionParameters(algorithm, operation, private_key,
-                                           public_key)
+  session_params = _AtapSessionParameters()
+  session_params.operation = operation
+  session_params.algorithm = algorithm
+  session_params.private_key = private_key
+  session_params.public_key = public_key
 
   # "Operation Start" Header
   # +2 for algo and operation bytes
-  header = (_MESSAGE_VERSION, 0, 0, 0, _ECDH_KEY_LEN + 2)
+  if not message_version:
+    message_version = _get_message_version(session_params)
+
+  session_params.message_version = message_version
+  header = (message_version, 0, 0, 0, _ECDH_KEY_LEN + 2)
   operation_start = bytearray(struct.pack('<4B I', *header))
 
   # "Operation Start" Message
@@ -93,8 +126,10 @@ def _write_operation_start(algorithm, operation):
   with open('tmp/operation_start.bin', 'wb') as f:
     f.write(operation_start)
 
+  return session_params
 
-def _get_ca_response(ca_request):
+
+def _get_ca_response(ca_request, session_params):
   """Writes a CA Response message to tmp/ca_response.bin.
 
   Parses the CA Request message at ca_request. Computes the session key from
@@ -104,6 +139,7 @@ def _get_ca_response(ca_request):
 
   Args:
     ca_request: The CA Request message from the device.
+    session_params: Session information.
 
   Raises:
     ValueError: ca_request is malformed.
@@ -113,6 +149,7 @@ def _get_ca_response(ca_request):
   cleartext header                            8
   cleartext device ephemeral public key       33
   cleartext GCM IV                            12
+  cleartext inner ca request length           4
   encrypted header                            8
   encrypted SOM key certificate chain         variable
   encrypted SOM key authentication signature  variable
@@ -121,144 +158,115 @@ def _get_ca_response(ca_request):
   encrypted ECDSA public key                  variable
   encrypted edDSA public key                  variable
   cleartext GCM tag                           16
+
+  For SoM:
+
+  cleartext header                            8
+  cleartext device ephemeral public key       33
+  cleartext GCM IV                            12
+  cleartext inner ca request length           4
+  encrypted header                            8
+  encrypted SOM ID SHA256 hash                32
+  cleartext GCM tag                           16
   """
+  is_som_request = False
+  if (session_params.operation == _OPERATIONS['ISSUE_SOM'] or
+      session_params.operation == _OPERATIONS['ISSUE_ENC_SOM']):
+    is_som_request = True
 
-  var_len = 4
-  header_len = 8
   pub_key_len = _ECDH_KEY_LEN
-  gcm_iv_len = 12
-  prod_id_hash_len = 32
-  gcm_tag_len = 16
 
-  min_message_length = (
-      header_len + pub_key_len + gcm_iv_len + header_len + var_len + var_len +
-      prod_id_hash_len + var_len + var_len + var_len + gcm_tag_len)
-
-  if len(ca_request) < min_message_length:
-    raise ValueError('Malformed message: Length invalid')
+  if is_som_request:
+    message_length = (
+        _HEADER_LEN + pub_key_len + _GCM_IV_LEN + _VAR_LEN + _HEADER_LEN +
+        _HASH_LEN + _GCM_TAG_LEN)
+    if len(ca_request) != message_length:
+      raise ValueError('Malformed message: Length invalid')
+  else:
+    min_message_length = (
+        _HEADER_LEN + pub_key_len + _GCM_IV_LEN + _VAR_LEN + _HEADER_LEN +
+        _VAR_LEN + _VAR_LEN + _HASH_LEN + _VAR_LEN + _VAR_LEN +
+        _VAR_LEN + _GCM_TAG_LEN)
+    if len(ca_request) < min_message_length:
+      raise ValueError('Malformed message: Length invalid')
 
   # Unpack Request header
-  end = header_len
+  end = _HEADER_LEN
   ca_req_start = ca_request[:end]
   (device_message_version, res1, res2, res3,
    device_message_len) = struct.unpack('<4B I', ca_req_start)
 
-  if device_message_version != _MESSAGE_VERSION:
-    raise ValueError('Malformed message: Incorrect message version')
+  if (device_message_version > _MESSAGE_VERSION_2 or
+      (device_message_version < _MESSAGE_VERSION_2 and is_som_request)):
+    raise ValueError('Malformed message: Unsupported protocol version')
 
   if res1 or res2 or res3:
     raise ValueError('Malformed message: Reserved values set')
 
-  if device_message_len > len(ca_request) - header_len:
+  if device_message_len > len(ca_request) - _HEADER_LEN:
     raise ValueError('Malformed message: Incorrect device message length')
 
   # Extract AT device ephemeral public key
-  start = header_len
+  start = _HEADER_LEN
   end = start + pub_key_len
-  device_pub_key = bytes(ca_request[start:end])
-
-  # Generate shared_key
-  salt = _session_params.public_key + device_pub_key
-  shared_key = _get_shared_key(_session_params.algorithm, device_pub_key, salt)
+  session_params.device_pub_key = bytes(ca_request[start:end])
+  _derive_from_shared_secret(session_params)
 
   # Decrypt AES-128-GCM message using the shared_key
   # Extract the GCM IV
-  start = header_len + pub_key_len
-  end = start + gcm_iv_len
+  start = _HEADER_LEN + pub_key_len
+  end = start + _GCM_IV_LEN
   gcm_iv = bytes(ca_request[start:end])
 
   # Extract the encrypted message
-  start = header_len + pub_key_len + gcm_iv_len
+  start = _HEADER_LEN + pub_key_len + _GCM_IV_LEN
   enc_message_len = _get_var_len(ca_request, start)
 
-  if enc_message_len > len(ca_request) - gcm_tag_len - start - var_len:
+  if enc_message_len > len(ca_request) - _GCM_TAG_LEN - start - _VAR_LEN:
     raise ValueError('Encrypted message size %d too large' % enc_message_len)
 
-  start += var_len
+  start += _VAR_LEN
   end = start + enc_message_len
   enc_message = bytes(ca_request[start:end])
 
   # Extract the GCM Tag
-  gcm_tag = bytes(ca_request[-gcm_tag_len:])
+  gcm_tag = bytes(ca_request[-_GCM_TAG_LEN:])
 
   # Decrypt message
   try:
-    data = AESGCM.decrypt(enc_message, shared_key, gcm_iv, gcm_tag)
+    data = AESGCM.decrypt(
+        enc_message, session_params.shared_key, gcm_iv, gcm_tag)
   except cryptography.exceptions.InvalidTag:
     raise ValueError('Malformed message: GCM decrypt failed')
 
   # Unpack Inner header
-  end = header_len
+  end = _HEADER_LEN
   ca_req_inner_header = data[:end]
-  (device_message_version, res1, res2, res3, inner_message_len) = struct.unpack(
+  (inner_message_version, res1, res2, res3, inner_message_len) = struct.unpack(
       '<4B I', ca_req_inner_header)
 
-  if device_message_version != _MESSAGE_VERSION:
+  if device_message_version != inner_message_version:
     raise ValueError('Malformed message: Incorrect inner message version')
 
   if res1 or res2 or res3:
     raise ValueError('Malformed message: Reserved values set')
 
-  remaining_bytes = len(ca_request) - header_len - pub_key_len
-  remaining_bytes = remaining_bytes - gcm_iv_len - gcm_tag_len
+  remaining_bytes = len(ca_request) - _HEADER_LEN - pub_key_len
+  remaining_bytes = remaining_bytes - _GCM_IV_LEN - _GCM_TAG_LEN
   if inner_message_len > remaining_bytes:
     raise ValueError('Malformed message: Incorrect device inner message length')
 
-  # SOM key certificate chain
-  som_chain_start = header_len
-  som_chain_len = _get_var_len(data, som_chain_start)
-  if som_chain_len > 0:
-    raise ValueError(
-        'SOM authentication not yet supported, set cert chain length to zero')
+  if is_som_request:
+    inner_ca_response = _parse_inner_ca_request_som(data, session_params)
+  else:
+    inner_ca_response = _parse_inner_ca_request_product(data, session_params)
 
-  # SOM key authentication signature
-  som_key_start = som_chain_start + var_len + som_chain_len
-  som_len = _get_var_len(data, som_key_start)
-  if som_len > 0:
-    raise ValueError(
-        'SOM authentication not yet supported, set signature length to zero')
-
-  # Product ID SHA-256 hash
-  prod_id_start = som_key_start + var_len + som_len
-  prod_id_end = prod_id_start + prod_id_hash_len
-  prod_id_hash = data[prod_id_start:prod_id_end]
-  print 'product_id hash:' + prod_id_hash.encode('hex')
-
-  # RSA public key to certify
-  rsa_start = prod_id_start + prod_id_hash_len
-  rsa_len = _get_var_len(data, rsa_start)
-  if rsa_len > 0:
-    raise ValueError(
-        'Certify operation not supported, set RSA public key length to zero')
-
-  # ECDSA public key to certify
-  ecdsa_start = rsa_start + var_len + rsa_len
-  ecdsa_len = _get_var_len(data, ecdsa_start)
-  if ecdsa_len > 0:
-    raise ValueError(
-        'Certify operation not supported, set ECDSA public key length to zero')
-
-  # edDSA public key to certify
-  eddsa_start = prod_id_start + var_len + prod_id_hash_len
-  eddsa_len = _get_var_len(data, eddsa_start)
-  if eddsa_len > 0:
-    raise ValueError(
-        'Certify operation not supported, set edDSA public key length to zero')
-
-  # ATFA treats ISSUE and ISSUE_ENCRYPTED operations the same
-  if _session_params.operation == _OPERATIONS['ISSUE']:
-    with open('keysets/unencrypted.keyset', 'rb') as infile:
-      inner_ca_response = bytes(infile.read())
-  elif _session_params.operation == _OPERATIONS['ISSUE_ENC']:
-    with open('keysets/encrypted.keyset', 'rb') as infile:
-      inner_ca_response = bytes(infile.read())
-
-  (gcm_iv, encrypted_keyset, gcm_tag) = AESGCM.encrypt(inner_ca_response,
-                                                       shared_key)
-
-  # "CA Response" Header
-  # +2 for algo and operation bytes
-  header = (_MESSAGE_VERSION, 0, 0, 0, 12 + 4 + len(encrypted_keyset) + 16)
+  (gcm_iv, encrypted_keyset, gcm_tag) = AESGCM.encrypt(
+      inner_ca_response, session_params.shared_key)
+   # "CA Response" Header
+  header = (
+      session_params.message_version,
+      0, 0, 0, 12 + 4 + len(encrypted_keyset) + 16)
   ca_response = bytearray(struct.pack('<4B I', *header))
 
   struct_fmt = '12s I %ds 16s' % len(inner_ca_response)
@@ -269,47 +277,193 @@ def _get_ca_response(ca_request):
     f.write(ca_response)
 
 
-def _get_shared_key(algorithm,
-                    device_pub_key,
-                    hkdf_salt,
-                    hkdf_info='KEY',
-                    hkdf_hash_len=16):
-  """Generates the shared key based on ECDH and HKDF.
+def _parse_inner_ca_request_product(data, session_params):
+  """Parse decrypted inner ca request and generate ca response.
 
-  Uses a particular ECDH algorithm and HKDF-SHA256 to create a shared key
+  The inner ca request is for issuing product key.
 
   Args:
-    algorithm: p256 or curve25519
-    device_pub_key: ephemeral public key from the AT device
-    hkdf_salt: salt to use in the HKDF operation
-    hkdf_info: info value to use in the HKDF operation
-    hkdf_hash_len: length of the outputted hash value for use as a shared key
+    data: Decrypted inner ca request.
+    session_params: Session information.
+  Returns:
+    The inner ca response byte object.
+  Raises:
+    ValueError: inner ca request is malformed.
+  """
+  # SOM key certificate chain
+  som_chain_start = _HEADER_LEN
+  som_chain_len = _get_var_len(data, som_chain_start)
+  if som_chain_len > 0:
+    # Som authentication cert chain is not empty, read it out.
+    som_chain = data[
+        som_chain_start + _VAR_LEN: som_chain_start + _VAR_LEN + som_chain_len]
+
+    with open('tmp/som_cert.bin', 'wb') as f:
+      f.write(som_chain)
+    cert_start = 0
+    i = 0
+    while cert_start < som_chain_len:
+      cert_len = _get_var_len(som_chain, cert_start)
+      cert_end = cert_start + _VAR_LEN + cert_len
+      cert = som_chain[cert_start + _VAR_LEN : cert_end]
+      # We output each certificate to a file.
+      # User should do their own verification of the certificate chain.
+      with open('tmp/som_cert_' + str(i) + '.bin', 'wb') as f:
+        f.write(cert)
+      cert_start = cert_end
+      i += 1
+
+  # SOM key authentication signature
+  som_sig_start = som_chain_start + _VAR_LEN + som_chain_len
+  som_sig_len = _get_var_len(data, som_sig_start)
+  if som_sig_len > 0:
+    print 'Som key signature found.'
+    som_sig = data[
+        som_sig_start + _VAR_LEN: som_sig_start + _VAR_LEN + som_sig_len]
+    with open('tmp/som_sig.bin', 'wb') as f:
+      f.write(som_sig)
+
+    # Write the som key authentication challenge to file. This would be
+    # verified against the signature.
+    with open('tmp/auth_value.bin', 'wb') as f:
+      f.write(session_params.auth_value)
+
+    # Verify Som signature
+    try:
+      subprocess.check_output(['openssl', 'x509', '-pubkey',
+                               '-in', 'tmp/som_cert_0.bin',
+                               '-inform', 'DER', '-out', 'tmp/pubkey.pem'])
+      digest_algorithm = '-sha512'
+      cert_info = subprocess.check_output([
+          'openssl', 'x509', '-noout', '-text', '-inform', 'DER',
+          '-in', 'tmp/som_cert_0.bin'])
+      for cert_info_line in cert_info.splitlines():
+        if ('Signature Algorithm' in cert_info_line and
+            'sha256' in cert_info_line):
+          digest_algorithm = '-sha256'
+          break
+      subprocess.check_output([
+          'openssl', 'dgst', digest_algorithm, '-verify', 'tmp/pubkey.pem',
+          '-signature', 'tmp/som_sig.bin', 'tmp/auth_value.bin'])
+    except subprocess.CalledProcessError as e:
+      print 'Fail to verify som authentication signature!'
+      raise e
+    print 'Som authentication signature verified OK!'
+
+  # Product ID SHA-256 hash
+  prod_id_start = som_sig_start + _VAR_LEN + som_sig_len
+  prod_id_end = prod_id_start + _HASH_LEN
+  prod_id_hash = data[prod_id_start:prod_id_end]
+  print 'product_id hash:' + prod_id_hash.encode('hex')
+
+  # RSA public key to certify
+  rsa_start = prod_id_start + _HASH_LEN
+  rsa_len = _get_var_len(data, rsa_start)
+  if rsa_len > 0:
+    raise ValueError(
+        'Certify operation not supported, set RSA public key length to zero')
+
+  # ECDSA public key to certify
+  ecdsa_start = rsa_start + _VAR_LEN + rsa_len
+  ecdsa_len = _get_var_len(data, ecdsa_start)
+  if ecdsa_len > 0:
+    raise ValueError(
+        'Certify operation not supported, set ECDSA public key length to zero')
+
+  # edDSA public key to certify
+  eddsa_start = prod_id_start + _VAR_LEN + _HASH_LEN
+  eddsa_len = _get_var_len(data, eddsa_start)
+  if eddsa_len > 0:
+    raise ValueError(
+        'Certify operation not supported, set edDSA public key length to zero')
+
+  # ATFA treats ISSUE and ISSUE_ENCRYPTED operations the same
+  if session_params.operation == _OPERATIONS['ISSUE']:
+    unencrypted_key_file = 'keysets/unencrypted_product.keyset'
+    if session_params.message_version == _MESSAGE_VERSION_1:
+      # Use inner message with version 1 for legacy support.
+      unencrypted_key_file = 'keysets/unencrypted_product_version_1.keyset'
+    with open(unencrypted_key_file, 'rb') as infile:
+      inner_ca_response = bytes(infile.read())
+  elif session_params.operation == _OPERATIONS['ISSUE_ENC']:
+    encrypted_key_file = 'keysets/encrypted_product.keyset'
+    if session_params.message_version == _MESSAGE_VERSION_1:
+      # Use inner message with version 1 for legacy support.
+      encrypted_key_file = 'keysets/encrypted_product_version_1.keyset'
+    with open(encrypted_key_file, 'rb') as infile:
+      inner_ca_response = bytes(infile.read())
+
+  return inner_ca_response
+
+
+def _parse_inner_ca_request_som(data, session_params):
+  """Parse decrypted inner ca request and generate ca response.
+
+  The inner ca request is for issuing som key.
+
+  Args:
+    data: Decrypted inner ca request.
+    session_params: Session information.
+  Returns:
+    The inner ca response byte object.
+  """
+  som_id_start = _HEADER_LEN
+  som_id_end = som_id_start + _HASH_LEN
+  som_id_hash = data[som_id_start:som_id_end]
+  print 'som_id hash:' + som_id_hash.encode('hex')
+
+  if session_params.operation == _OPERATIONS['ISSUE_SOM']:
+    with open('keysets/unencrypted_som.keyset', 'rb') as infile:
+      inner_ca_response = bytes(infile.read())
+  elif session_params.operation == _OPERATIONS['ISSUE_ENC_SOM']:
+    with open('keysets/encrypted_som.keyset', 'rb') as infile:
+      inner_ca_response = bytes(infile.read())
+
+  return inner_ca_response
+
+
+def _derive_from_shared_secret(session_params):
+  """Generates the shared key based on ECDH and HKDF.
+
+  Uses a particular ECDH algorithm and HKDF-SHA256 to create shared key and a
+  auth value. The auth value would be sent to the device as a challenge to get
+  som authentication if available. The generated shared key and auth value
+  would be stored in session_params.
+
+  Args:
+    session_params: Session information.
 
   Raises:
     RuntimeError: Computing the shared secret fails.
 
-  Returns:
-    The shared key.
   """
 
-  if algorithm == _ALGORITHMS['p256']:
-    ecdhe_shared_secret = ec_helper.compute_p256_shared_secret(
-        _session_params.private_key, device_pub_key)
+  hkdf_salt = session_params.public_key + session_params.device_pub_key
 
-  elif algorithm == _ALGORITHMS['x25519']:
-    device_pub_key = device_pub_key[:-1]
-    ecdhe_shared_secret = curve25519.shared(_session_params.private_key,
+  if session_params.algorithm == _ALGORITHMS['p256']:
+    ecdhe_shared_secret = ec_helper.compute_p256_shared_secret(
+        session_params.private_key, session_params.device_pub_key)
+
+  elif session_params.algorithm == _ALGORITHMS['x25519']:
+    device_pub_key = session_params.device_pub_key[:-1]
+    ecdhe_shared_secret = curve25519.shared(session_params.private_key,
                                             device_pub_key)
 
   hkdf = HKDF(
       algorithm=hashes.SHA256(),
-      length=hkdf_hash_len,
+      length=_HKDF_HASH_LEN,
       salt=hkdf_salt,
-      info=hkdf_info,
+      info='KEY',
       backend=default_backend())
-  shared_key = hkdf.derive(ecdhe_shared_secret)
+  session_params.shared_key = hkdf.derive(ecdhe_shared_secret)
 
-  return shared_key
+  hkdf = HKDF(
+      algorithm=hashes.SHA256(),
+      length=_HKDF_HASH_LEN,
+      salt=hkdf_salt,
+      info='SIGN',
+      backend=default_backend())
+  session_params.auth_value = hkdf.derive(ecdhe_shared_secret)
 
 
 def _get_var_len(data, index):
@@ -349,22 +503,32 @@ def main():
       '--operation',
       type=str,
       default='ISSUE',
-      choices=['ISSUE', 'ISSUE_ENC'],
+      choices=['ISSUE', 'ISSUE_ENC', 'ISSUE_SOM', 'ISSUE_ENC_SOM'],
       dest='operation',
       help='Operation for provisioning the device')
+  parser.add_argument(
+      '--atapversion',
+      type=int,
+      required=False,
+      choices=[_MESSAGE_VERSION_1, _MESSAGE_VERSION_2],
+      dest='atap_version',
+      help='AThings protocol message version')
 
   results = parser.parse_args()
   fastboot_device = results.serial
   algorithm = _ALGORITHMS[results.algorithm]
   operation = _OPERATIONS[results.operation]
-  _write_operation_start(algorithm, operation)
+  message_version = None
+  if hasattr(results, 'atap_version'):
+    message_version = results.atap_version
+  session_params = _write_operation_start(algorithm, operation, message_version)
   print 'Wrote Operation Start message to tmp/operation_start.bin'
   os.system('fastboot -s %s stage tmp/operation_start.bin' % fastboot_device)
   os.system('fastboot -s %s oem at-get-ca-request' % fastboot_device)
   os.system('fastboot -s %s get_staged tmp/ca_request.bin' % fastboot_device)
   with open('tmp/ca_request.bin', 'rb') as f:
     ca_request = bytearray(f.read())
-    _get_ca_response(ca_request)
+    _get_ca_response(ca_request, session_params)
   print 'Wrote CA Response message to tmp/ca_response.bin'
   os.system('fastboot -s %s stage tmp/ca_response.bin' % fastboot_device)
   os.system('fastboot -s %s oem at-set-ca-response' % fastboot_device)
