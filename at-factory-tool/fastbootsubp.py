@@ -206,14 +206,12 @@ class FastbootDevice(object):
       # Need to redirect stderr to stdout.
       self._lock.acquire()
 
-      # Need the shell=True flag for windows, otherwise it hangs.
       out = subprocess.check_output(
           [
               FastbootDevice.fastboot_command, '-s', self.serial_number,
               'getvar', var
           ],
           stderr=subprocess.STDOUT,
-          shell=True,
           creationflags=CREATE_NO_WINDOW)
     except subprocess.CalledProcessError as e:
       # Since we redirected stderr, we should print stdout here.
