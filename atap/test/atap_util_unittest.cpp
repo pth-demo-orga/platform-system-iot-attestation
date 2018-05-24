@@ -152,54 +152,58 @@ TEST_F(UtilTest, SerializeCertChain) {
   EXPECT_FALSE(copy_cert_chain_from_buf(&end, &chain));
 }
 
-TEST_F(UtilTest, InnerCaRequestCertifyWithAuth) {
-  AtapInnerCaRequest req;
-  atap_memset(&req, 0, sizeof(AtapInnerCaRequest));
-  alloc_test_cert_chain(&req.auth_key_cert_chain);
-  alloc_test_blob(&req.signature);
-  atap_memset(req.product_id_hash, 0x66, ATAP_SHA256_DIGEST_LEN);
-  alloc_test_blob(&req.RSA_pubkey);
-  alloc_test_blob(&req.ECDSA_pubkey);
-  alloc_test_blob(&req.edDSA_pubkey);
-  uint32_t size = inner_ca_request_serialized_size(&req);
+TEST_F(UtilTest, InnerCaRequestCertifyWithAuthProduct) {
+  AtapInnerCaRequestProduct inner_ca_request_product;
+  atap_memset(&inner_ca_request_product, 0, sizeof(AtapInnerCaRequestProduct));
+  AtapInnerCaRequestProduct *req_product = &inner_ca_request_product;
+  alloc_test_cert_chain(&req_product->auth_key_cert_chain);
+  alloc_test_blob(&req_product->signature);
+  atap_memset(req_product->product_id_hash, 0x66, ATAP_SHA256_DIGEST_LEN);
+  alloc_test_blob(&req_product->RSA_pubkey);
+  alloc_test_blob(&req_product->ECDSA_pubkey);
+  alloc_test_blob(&req_product->edDSA_pubkey);
+  uint32_t size = inner_ca_request_product_serialized_size(req_product);
 
   uint8_t buf[4096];
-  uint8_t* end = append_inner_ca_request_to_buf(buf, &req);
+  uint8_t* end = append_inner_ca_request_product_to_buf(buf, req_product);
   EXPECT_EQ(buf + size, end);
   uint32_t i = 0;
   validate_header(buf, size, &i);
   uint8_t* auth_cert_chain_buf =
-      next(buf, &i, cert_chain_serialized_size(&req.auth_key_cert_chain));
-  validate_cert_chain(auth_cert_chain_buf, &req.auth_key_cert_chain);
+      next(buf, &i, cert_chain_serialized_size(
+          &req_product->auth_key_cert_chain));
+  validate_cert_chain(auth_cert_chain_buf, &req_product->auth_key_cert_chain);
   uint8_t* auth_signature_buf =
-      next(buf, &i, blob_serialized_size(&req.signature));
-  validate_blob(auth_signature_buf, &req.signature);
+      next(buf, &i, blob_serialized_size(&req_product->signature));
+  validate_blob(auth_signature_buf, &req_product->signature);
   uint8_t* product_id_hash = next(buf, &i, ATAP_SHA256_DIGEST_LEN);
   EXPECT_EQ(
-      0, memcmp(req.product_id_hash, product_id_hash, ATAP_SHA256_DIGEST_LEN));
+      0, memcmp(req_product->product_id_hash, product_id_hash,
+      ATAP_SHA256_DIGEST_LEN));
   uint8_t* RSA_pubkey_buf =
-      next(buf, &i, blob_serialized_size(&req.RSA_pubkey));
-  validate_blob(RSA_pubkey_buf, &req.RSA_pubkey);
+      next(buf, &i, blob_serialized_size(&req_product->RSA_pubkey));
+  validate_blob(RSA_pubkey_buf, &req_product->RSA_pubkey);
   uint8_t* ECDSA_pubkey_buf =
-      next(buf, &i, blob_serialized_size(&req.ECDSA_pubkey));
-  validate_blob(ECDSA_pubkey_buf, &req.ECDSA_pubkey);
+      next(buf, &i, blob_serialized_size(&req_product->ECDSA_pubkey));
+  validate_blob(ECDSA_pubkey_buf, &req_product->ECDSA_pubkey);
   uint8_t* edDSA_pubkey_buf =
-      next(buf, &i, blob_serialized_size(&req.edDSA_pubkey));
-  validate_blob(edDSA_pubkey_buf, &req.edDSA_pubkey);
-  free_inner_ca_request(req);
+      next(buf, &i, blob_serialized_size(&req_product->edDSA_pubkey));
+  validate_blob(edDSA_pubkey_buf, &req_product->edDSA_pubkey);
+  free_inner_ca_request_product(req_product);
 }
 
-TEST_F(UtilTest, InnerCaRequestCertifyNoAuth) {
-  AtapInnerCaRequest req;
-  atap_memset(&req, 0, sizeof(AtapInnerCaRequest));
-  atap_memset(req.product_id_hash, 0x66, ATAP_SHA256_DIGEST_LEN);
-  alloc_test_blob(&req.RSA_pubkey);
-  alloc_test_blob(&req.ECDSA_pubkey);
-  alloc_test_blob(&req.edDSA_pubkey);
-  uint32_t size = inner_ca_request_serialized_size(&req);
+TEST_F(UtilTest, InnerCaRequestCertifyNoAuthProduct) {
+  AtapInnerCaRequestProduct inner_ca_request_product;
+  atap_memset(&inner_ca_request_product, 0, sizeof(AtapInnerCaRequestProduct));
+  AtapInnerCaRequestProduct *req_product = &inner_ca_request_product;
+  atap_memset(req_product->product_id_hash, 0x66, ATAP_SHA256_DIGEST_LEN);
+  alloc_test_blob(&req_product->RSA_pubkey);
+  alloc_test_blob(&req_product->ECDSA_pubkey);
+  alloc_test_blob(&req_product->edDSA_pubkey);
+  uint32_t size = inner_ca_request_product_serialized_size(req_product);
 
   uint8_t buf[4096];
-  uint8_t* end = append_inner_ca_request_to_buf(buf, &req);
+  uint8_t* end = append_inner_ca_request_product_to_buf(buf, req_product);
   EXPECT_EQ(buf + size, end);
   uint32_t i = 0;
   validate_header(buf, size, &i);
@@ -209,58 +213,63 @@ TEST_F(UtilTest, InnerCaRequestCertifyNoAuth) {
   EXPECT_EQ(0, auth_signature_len);
   uint8_t* product_id_hash = next(buf, &i, ATAP_SHA256_DIGEST_LEN);
   EXPECT_EQ(
-      0, memcmp(req.product_id_hash, product_id_hash, ATAP_SHA256_DIGEST_LEN));
+      0, memcmp(req_product->product_id_hash,
+                product_id_hash, ATAP_SHA256_DIGEST_LEN));
   uint8_t* RSA_pubkey_buf =
-      next(buf, &i, blob_serialized_size(&req.RSA_pubkey));
-  validate_blob(RSA_pubkey_buf, &req.RSA_pubkey);
+      next(buf, &i, blob_serialized_size(&req_product->RSA_pubkey));
+  validate_blob(RSA_pubkey_buf, &req_product->RSA_pubkey);
   uint8_t* ECDSA_pubkey_buf =
-      next(buf, &i, blob_serialized_size(&req.ECDSA_pubkey));
-  validate_blob(ECDSA_pubkey_buf, &req.ECDSA_pubkey);
+      next(buf, &i, blob_serialized_size(&req_product->ECDSA_pubkey));
+  validate_blob(ECDSA_pubkey_buf, &req_product->ECDSA_pubkey);
   uint8_t* edDSA_pubkey_buf =
-      next(buf, &i, blob_serialized_size(&req.edDSA_pubkey));
-  validate_blob(edDSA_pubkey_buf, &req.edDSA_pubkey);
-  free_inner_ca_request(req);
+      next(buf, &i, blob_serialized_size(&req_product->edDSA_pubkey));
+  validate_blob(edDSA_pubkey_buf, &req_product->edDSA_pubkey);
+  free_inner_ca_request_product(req_product);
 }
 
-TEST_F(UtilTest, InnerCaRequestIssueWithAuth) {
-  AtapInnerCaRequest req;
-  atap_memset(&req, 0, sizeof(AtapInnerCaRequest));
-  alloc_test_cert_chain(&req.auth_key_cert_chain);
-  alloc_test_blob(&req.signature);
-  atap_memset(req.product_id_hash, 0x66, ATAP_SHA256_DIGEST_LEN);
-  uint32_t size = inner_ca_request_serialized_size(&req);
+TEST_F(UtilTest, InnerCaRequestIssueWithAuthProduct) {
+  AtapInnerCaRequestProduct inner_ca_request_product;
+  atap_memset(&inner_ca_request_product, 0, sizeof(AtapInnerCaRequestProduct));
+  AtapInnerCaRequestProduct *req_product = &inner_ca_request_product;
+  alloc_test_cert_chain(&req_product->auth_key_cert_chain);
+  alloc_test_blob(&req_product->signature);
+  atap_memset(req_product->product_id_hash, 0x66, ATAP_SHA256_DIGEST_LEN);
+  uint32_t size = inner_ca_request_product_serialized_size(req_product);
 
   uint8_t buf[4096];
-  uint8_t* end = append_inner_ca_request_to_buf(buf, &req);
+  uint8_t* end = append_inner_ca_request_product_to_buf(buf, req_product);
   EXPECT_EQ(buf + size, end);
   uint32_t i = 0;
   validate_header(buf, size, &i);
   uint8_t* auth_cert_chain_buf =
-      next(buf, &i, cert_chain_serialized_size(&req.auth_key_cert_chain));
-  validate_cert_chain(auth_cert_chain_buf, &req.auth_key_cert_chain);
+      next(buf, &i, cert_chain_serialized_size(
+          &req_product->auth_key_cert_chain));
+  validate_cert_chain(auth_cert_chain_buf, &req_product->auth_key_cert_chain);
   uint8_t* auth_signature_buf =
-      next(buf, &i, blob_serialized_size(&req.signature));
-  validate_blob(auth_signature_buf, &req.signature);
+      next(buf, &i, blob_serialized_size(&req_product->signature));
+  validate_blob(auth_signature_buf, &req_product->signature);
   uint8_t* product_id_hash = next(buf, &i, ATAP_SHA256_DIGEST_LEN);
   EXPECT_EQ(
-      0, memcmp(req.product_id_hash, product_id_hash, ATAP_SHA256_DIGEST_LEN));
+      0, memcmp(req_product->product_id_hash,
+                product_id_hash, ATAP_SHA256_DIGEST_LEN));
   int32_t RSA_pubkey_size = *(int32_t*)next(buf, &i, sizeof(int32_t));
   EXPECT_EQ(0, RSA_pubkey_size);
   int32_t ECDSA_pubkey_size = *(int32_t*)next(buf, &i, sizeof(int32_t));
   EXPECT_EQ(0, ECDSA_pubkey_size);
   int32_t edDSA_pubkey_size = *(int32_t*)next(buf, &i, sizeof(int32_t));
   EXPECT_EQ(0, edDSA_pubkey_size);
-  free_inner_ca_request(req);
+  free_inner_ca_request_product(req_product);
 }
 
-TEST_F(UtilTest, InnerCaRequestIssueNoAuth) {
-  AtapInnerCaRequest req;
-  atap_memset(&req, 0, sizeof(AtapInnerCaRequest));
-  atap_memset(req.product_id_hash, 0x66, ATAP_SHA256_DIGEST_LEN);
-  uint32_t size = inner_ca_request_serialized_size(&req);
+TEST_F(UtilTest, InnerCaRequestIssueNoAuthProduct) {
+  AtapInnerCaRequestProduct inner_ca_request_product;
+  atap_memset(&inner_ca_request_product, 0, sizeof(AtapInnerCaRequestProduct));
+  AtapInnerCaRequestProduct *req_product = &inner_ca_request_product;
+  atap_memset(req_product->product_id_hash, 0x66, ATAP_SHA256_DIGEST_LEN);
+  uint32_t size = inner_ca_request_product_serialized_size(req_product);
 
   uint8_t buf[4096];
-  uint8_t* end = append_inner_ca_request_to_buf(buf, &req);
+  uint8_t* end = append_inner_ca_request_product_to_buf(buf, req_product);
   EXPECT_EQ(buf + size, end);
   uint32_t i = 0;
   validate_header(buf, size, &i);
@@ -270,14 +279,33 @@ TEST_F(UtilTest, InnerCaRequestIssueNoAuth) {
   EXPECT_EQ(0, auth_signature_len);
   uint8_t* product_id_hash = next(buf, &i, ATAP_SHA256_DIGEST_LEN);
   EXPECT_EQ(
-      0, memcmp(req.product_id_hash, product_id_hash, ATAP_SHA256_DIGEST_LEN));
+      0, memcmp(req_product->product_id_hash,
+                product_id_hash, ATAP_SHA256_DIGEST_LEN));
   int32_t RSA_pubkey_size = *(int32_t*)next(buf, &i, sizeof(int32_t));
   EXPECT_EQ(0, RSA_pubkey_size);
   int32_t ECDSA_pubkey_size = *(int32_t*)next(buf, &i, sizeof(int32_t));
   EXPECT_EQ(0, ECDSA_pubkey_size);
   int32_t edDSA_pubkey_size = *(int32_t*)next(buf, &i, sizeof(int32_t));
   EXPECT_EQ(0, edDSA_pubkey_size);
-  free_inner_ca_request(req);
+  free_inner_ca_request_product(req_product);
+}
+
+TEST_F(UtilTest, InnerCaRequestIssueSom) {
+  AtapInnerCaRequestSom inner_ca_request_som;
+  atap_memset(&inner_ca_request_som, 0, sizeof(AtapInnerCaRequestSom));
+  AtapInnerCaRequestSom *req_som = &inner_ca_request_som;
+  atap_memset(req_som->som_id_hash, 0x66, ATAP_SHA256_DIGEST_LEN);
+  uint32_t size = inner_ca_request_som_serialized_size();
+
+  uint8_t buf[4096];
+  uint8_t* end = append_inner_ca_request_som_to_buf(buf, req_som);
+  EXPECT_EQ(buf + size, end);
+  uint32_t i = 0;
+  validate_header(buf, size, &i);
+  uint8_t* som_id_hash = next(buf, &i, ATAP_SHA256_DIGEST_LEN);
+  EXPECT_EQ(
+      0, memcmp(req_som->som_id_hash,
+                som_id_hash, ATAP_SHA256_DIGEST_LEN));
 }
 
 TEST_F(UtilTest, CaRequest) {
@@ -303,7 +331,7 @@ TEST_F(UtilTest, CaRequest) {
   validate_blob(encrypted_inner_buf, &req.encrypted_inner_ca_request);
   uint8_t* tag = next(buf, &i, ATAP_GCM_TAG_LEN);
   EXPECT_EQ(0, memcmp(req.tag, tag, ATAP_GCM_TAG_LEN));
-  free_ca_request(req);
+  free_ca_request(&req);
 }
 
 TEST_F(UtilTest, ValidateEncryptedMessage) {
