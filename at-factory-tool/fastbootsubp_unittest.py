@@ -194,7 +194,6 @@ class FastbootSubpTest(unittest.TestCase):
     mock_fastboot_commands.assert_called_once_with(
         ['fastboot', '-s', self.TEST_SERIAL, 'getvar', self.TEST_VAR],
         stderr=subprocess.STDOUT,
-        shell=True,
         creationflags=CREATE_NO_WINDOW)
     self.assertEqual(self.TEST_MESSAGE, message)
 
