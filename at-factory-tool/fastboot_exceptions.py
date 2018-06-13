@@ -52,7 +52,7 @@ class ProductNotSpecifiedException(AtftBaseException):
 
   def __init__(self):
     AtftBaseException.__init__(self)
-    self.msg = 'Product Attribute File Not Selected!'
+    self.msg = 'Product or SoM Attribute File Not Selected!'
 
 
 class ProductAttributesFileFormatError(AtftBaseException):

@@ -42,6 +42,7 @@ class MockAtft(atft.Atft):
     self._CreateThread = self._MockCreateThread
     self.TARGET_DEV_SIZE = 6
     atft.Atft.__init__(self)
+    self.PROVISION_STEPS = self.DEFAULT_PROVISION_STEPS_PRODUCT
 
   def _MockParseConfig(self):
     self.ATFT_VERSION = 'vTest'
@@ -165,7 +166,7 @@ class AtftTest(unittest.TestCase):
     dev2.provision_state = dev2_state
     mock_atft.atft_manager.target_devs = [dev1, dev2]
     mock_atft.device_usb_locations = []
-    for i in range(0, mock_atft.TARGET_DEV_SIZE):
+    for i in range(mock_atft.TARGET_DEV_SIZE):
       mock_atft.device_usb_locations.append(None)
     mock_atft.device_usb_locations[0] = self.TEST_LOCATION1
     mock_atft.device_usb_locations[5] = self.TEST_LOCATION2
@@ -318,6 +319,7 @@ class AtftTest(unittest.TestCase):
     mock_atft.atft_manager = MagicMock()
     mock_atft.atft_manager.atfa_dev = MagicMock()
     mock_atft.atft_manager.product_info = None
+    mock_atft.atft_manager.som_info = None
     mock_atft.atft_manager.GetCachedATFAKeysLeft.return_value = 10
     mock_atft.PrintToCommandWindow = MagicMock()
     mock_atft.OnEnterAutoProv()
@@ -346,15 +348,15 @@ class AtftTest(unittest.TestCase):
     mock_atft.atft_manager.product_info = MagicMock()
     mock_atft.atft_manager.GetCachedATFAKeysLeft.return_value = 0
     mock_atft.PrintToCommandWindow = MagicMock()
-    mock_atft.atft_manager.target_devs = []
     test_dev1 = TestDeviceInfo(
         self.TEST_SERIAL1, self.TEST_LOCATION1,
         ProvisionStatus.PROVISION_SUCCESS)
     test_dev2 = TestDeviceInfo(
         self.TEST_SERIAL2, self.TEST_LOCATION1,
         ProvisionStatus.WAITING)
-    mock_atft.atft_manager.target_devs.append(test_dev1)
-    mock_atft.atft_manager.target_devs.append(test_dev2)
+    mock_atft._GetTargetDevices = MagicMock()
+    mock_atft._GetTargetDevices.return_value = [
+        test_dev1, test_dev2]
     mock_atft.atft_manager.CheckProvisionStatus.side_effect = (
         lambda target=test_dev2, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
@@ -408,12 +410,12 @@ class AtftTest(unittest.TestCase):
     test_dev1.provision_state.bootloader_locked = True
     test_dev1.provision_state.avb_perm_attr_set = True
     test_dev1.provision_state.avb_locked = True
-    test_dev1.provision_state.provisioned = True
+    test_dev1.provision_state.product_provisioned = True
     test_dev2 = TestDeviceInfo(self.TEST_SERIAL2, self.TEST_LOCATION1,
                                ProvisionStatus.IDLE)
-    mock_atft.atft_manager.target_devs = []
-    mock_atft.atft_manager.target_devs.append(test_dev1)
-    mock_atft.atft_manager.target_devs.append(test_dev2)
+    mock_atft._GetTargetDevices = MagicMock()
+    mock_atft._GetTargetDevices.return_value = [
+        test_dev1, test_dev2]
     mock_atft._CreateThread = MagicMock()
     mock_atft._HandleStateTransition = MagicMock()
     mock_atft._HandleAutoProv()
@@ -444,7 +446,7 @@ class AtftTest(unittest.TestCase):
     mock_atft.atft_manager.GetCachedATFAKeysLeft.side_effect = (
         lambda: self.MockGetKeysLeft(keys_left_array))
     mock_atft.atft_manager.UpdateATFAKeysLeft.side_effect = (
-        lambda: self.MockSetKeysLeft(keys_left_array))
+        lambda is_som_key: self.MockSetKeysLeft(keys_left_array))
     mock_atft._HandleKeysLeft()
     mock_atft._SetStatusTextColor.assert_called_once_with('10', mock_black)
 
@@ -523,10 +525,10 @@ class AtftTest(unittest.TestCase):
     if state == ProvisionStatus.LOCKAVB_SUCCESS:
       target.provision_state.avb_locked = True
     if state == ProvisionStatus.PROVISION_SUCCESS:
-      target.provision_state.provisioned = True
+      target.provision_state.product_provisioned = True
     if state == ProvisionStatus.UNLOCKAVB_SUCCESS:
       target.provision_state.avb_locked = False
-    if target.provision_state.provisioned:
+    if target.provision_state.product_provisioned:
       target.provision_status = ProvisionStatus.PROVISION_SUCCESS
       return
     if target.provision_state.avb_locked:
@@ -556,7 +558,7 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -585,7 +587,7 @@ class AtftTest(unittest.TestCase):
             self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
             self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -614,8 +616,8 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
-        self.MockStateChange(target, state))
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+            self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
     mock_atft.atft_manager = MagicMock()
@@ -642,8 +644,8 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
-        self.MockStateChange(target, state))
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+            self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
     mock_atft.atft_manager = MagicMock()
@@ -671,8 +673,8 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
-        self.MockStateChange(target, state))
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+            self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
     mock_atft.atft_manager = MagicMock()
@@ -699,8 +701,8 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_FAILED:
-        self.MockStateChange(target, state))
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_FAILED:
+            self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
     mock_atft.atft_manager = MagicMock()
@@ -728,8 +730,8 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
-        self.MockStateChange(target, state))
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+            self.MockStateChange(target, state))
 
     # The device has bootloader_locked and avb_locked set. Should fuse perm attr
     # and provision key.
@@ -748,7 +750,7 @@ class AtftTest(unittest.TestCase):
     self.assertEqual(True, test_dev1.provision_state.bootloader_locked)
     self.assertEqual(True, test_dev1.provision_state.avb_perm_attr_set)
     self.assertEqual(True, test_dev1.provision_state.avb_locked)
-    self.assertEqual(True, test_dev1.provision_state.provisioned)
+    self.assertEqual(True, test_dev1.provision_state.product_provisioned)
 
   def testHandleStateTransitionIncludeUnlock(self):
     """Test the provision_steps that unlock avb after provisioning.
@@ -769,7 +771,7 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._UnlockAvbTarget = MagicMock()
     mock_atft._UnlockAvbTarget.side_effect = (
@@ -781,7 +783,7 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
 
     mock_atft.PROVISION_STEPS = ['FuseVbootKey', 'FusePermAttr', 'LockAvb',
-         'Provision', 'UnlockAvb']
+         'ProvisionProduct', 'UnlockAvb']
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
     mock_atft.atft_manager = MagicMock()
@@ -796,7 +798,7 @@ class AtftTest(unittest.TestCase):
     self.assertEqual(True, test_dev1.provision_state.bootloader_locked)
     self.assertEqual(True, test_dev1.provision_state.avb_perm_attr_set)
     self.assertEqual(False, test_dev1.provision_state.avb_locked)
-    self.assertEqual(True, test_dev1.provision_state.provisioned)
+    self.assertEqual(True, test_dev1.provision_state.product_provisioned)
     self.assertEqual(
         ProvisionStatus.PROVISION_SUCCESS, test_dev1.provision_status)
     self.assertEqual(
@@ -816,7 +818,7 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._UnlockAvbTarget = MagicMock()
     mock_atft._UnlockAvbTarget.side_effect = (
@@ -828,7 +830,7 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
 
     mock_atft.PROVISION_STEPS = ['FuseVbootKey', 'FusePermAttr', 'LockAvb',
-         'Provision', 'UnlockAvb', 'LockAvb', 'UnlockAvb']
+         'ProvisionProduct', 'UnlockAvb', 'LockAvb', 'UnlockAvb']
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
     mock_atft.atft_manager = MagicMock()
@@ -838,7 +840,7 @@ class AtftTest(unittest.TestCase):
     self.assertEqual(True, test_dev1.provision_state.bootloader_locked)
     self.assertEqual(True, test_dev1.provision_state.avb_perm_attr_set)
     self.assertEqual(False, test_dev1.provision_state.avb_locked)
-    self.assertEqual(True, test_dev1.provision_state.provisioned)
+    self.assertEqual(True, test_dev1.provision_state.product_provisioned)
     self.assertEqual(
         ProvisionStatus.PROVISION_SUCCESS, test_dev1.provision_status)
     self.assertEqual(
@@ -862,14 +864,14 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
         lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
 
-    mock_atft.PROVISION_STEPS = ['FusePermAttr', 'FuseVbootKey', 'Provision',
+    mock_atft.PROVISION_STEPS = ['FusePermAttr', 'FuseVbootKey', 'ProvisionProduct',
                                  'LockAvb']
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -884,7 +886,7 @@ class AtftTest(unittest.TestCase):
     self.assertEqual(True, test_dev1.provision_state.bootloader_locked)
     self.assertEqual(True, test_dev1.provision_state.avb_perm_attr_set)
     self.assertEqual(True, test_dev1.provision_state.avb_locked)
-    self.assertEqual(True, test_dev1.provision_state.provisioned)
+    self.assertEqual(True, test_dev1.provision_state.product_provisioned)
     self.assertEqual(
         ProvisionStatus.PROVISION_SUCCESS, test_dev1.provision_status)
     self.assertEqual(
@@ -906,7 +908,7 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
@@ -927,7 +929,7 @@ class AtftTest(unittest.TestCase):
     self.assertEqual(True, test_dev1.provision_state.bootloader_locked)
     self.assertEqual(True, test_dev1.provision_state.avb_perm_attr_set)
     self.assertEqual(True, test_dev1.provision_state.avb_locked)
-    self.assertEqual(False, test_dev1.provision_state.provisioned)
+    self.assertEqual(False, test_dev1.provision_state.product_provisioned)
     self.assertEqual(
         ProvisionStatus.LOCKAVB_SUCCESS, test_dev1.provision_status)
     self.assertEqual(
@@ -1233,11 +1235,11 @@ class AtftTest(unittest.TestCase):
   def MockGetCachedATFAKeysLeft(self):
     return self.atfa_keys
 
-  def MockSuccessProvision(self, target):
+  def MockSuccessProvision(self, target, is_som_key=False):
     self.atfa_keys -= 1
     self.MockSetAttestUuid(target)
 
-  def MockFailedProvision(self, target):
+  def MockFailedProvision(self, target, is_som_key=False):
     pass
 
   def testCheckLowKeyAlert(self):
@@ -1263,26 +1265,26 @@ class AtftTest(unittest.TestCase):
     # First provision succeed
     # First check 101 left, no alert
     mock_atft.atft_manager.Provision.side_effect = self.MockSuccessProvision
-    mock_atft._ProvisionTarget(test_dev1)
+    mock_atft._ProvisionTarget(test_dev1, False)
     mock_atft._SendLowKeyAlertEvent.assert_not_called()
     # Second provision failed
     # Second check, assume 100 left, verify, 101 left no alert
     mock_atft.atft_manager.Provision.side_effect = self.MockFailedProvision
-    mock_atft._ProvisionTarget(test_dev1)
+    mock_atft._ProvisionTarget(test_dev1, False)
     mock_atft._SendLowKeyAlertEvent.assert_not_called()
     # Third check, assume 100 left, verify, 100 left, first warning
     mock_atft.atft_manager.Provision.side_effect = self.MockSuccessProvision
-    mock_atft._ProvisionTarget(test_dev1)
+    mock_atft._ProvisionTarget(test_dev1, False)
     mock_atft._SendLowKeyAlertEvent.assert_called_once()
     self.assertEqual(True, mock_atft.first_key_alert_shown)
     mock_atft._SendLowKeyAlertEvent.reset_mock()
     # Fourth check, assume 99 left, verify, 99 left, second warning
-    mock_atft._ProvisionTarget(test_dev1)
+    mock_atft._ProvisionTarget(test_dev1, False)
     mock_atft._SendLowKeyAlertEvent.assert_called_once()
     self.assertEqual(True, mock_atft.second_key_alert_shown)
     mock_atft._SendLowKeyAlertEvent.reset_mock()
     # Fifth check, no more warning, 98 left
-    mock_atft._ProvisionTarget(test_dev1)
+    mock_atft._ProvisionTarget(test_dev1, False)
     mock_atft._SendLowKeyAlertEvent.assert_not_called()
 
   def testCheckLowKeyAlertException(self):
@@ -1370,7 +1372,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._Shutdown()
     mock_atft._HandleException.assert_called_once()
 
-  def MockSetAttestUuid(self, target):
+  def MockSetAttestUuid(self, target, is_som_key=False):
     target.at_attest_uuid = self.TEST_ATTEST_UUID
 
   # Test atft._ManualProvision
@@ -1407,11 +1409,21 @@ class AtftTest(unittest.TestCase):
     mock_atft._GetSelectedSerials = MagicMock()
     mock_atft._GetSelectedSerials.return_value = serials
     mock_atft.atft_manager.atfa_dev = MagicMock()
+    # We are operating with product key.
+    mock_atft.atft_manager.product_info = MagicMock()
+    mock_atft.atft_manager.som_info = None
     mock_atft._ShowWarning = MagicMock()
     mock_atft._ShowWarning.return_value = False
     mock_atft.OnManualProvision(None)
-    calls = [call(test_dev1), call(test_dev2)]
+    calls = [call(test_dev1, False), call(test_dev2, False)]
     mock_atft.atft_manager.Provision.assert_has_calls(calls)
+
+    # Test som provision
+    mock_atft.atft_manager.Provision.reset_mock()
+    mock_atft.atft_manager.product_info = None
+    mock_atft.atft_manager.som_info = MagicMock
+    mock_atft.OnManualProvision(None)
+    calls = [call(test_dev1, True), call(test_dev2, True)]
 
   def testManualProvisionReprovision(self):
     mock_atft = MockAtft()
@@ -1426,28 +1438,44 @@ class AtftTest(unittest.TestCase):
     mock_atft._CheckLowKeyAlert = MagicMock()
     mock_atft.atft_manager.GetTargetDevice.side_effect = (
         self.MockGetTargetDevice)
+
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.PROVISION_FAILED)
     test_dev1.provision_state.bootloader_locked = True
     test_dev1.provision_state.avb_perm_attr_set = True
     test_dev1.provision_state.avb_locked = True
+
     test_dev2 = TestDeviceInfo(self.TEST_SERIAL2, self.TEST_LOCATION2,
                                ProvisionStatus.PROVISION_SUCCESS)
     test_dev2.provision_state.bootloader_locked = True
     test_dev2.provision_state.avb_perm_attr_set = True
     test_dev2.provision_state.avb_locked = True
-    test_dev2.provision_state.provisioned = True
+    test_dev2.provision_state.product_provisioned = True
+
+    test_dev3 = TestDeviceInfo(self.TEST_SERIAL2, self.TEST_LOCATION2,
+                               ProvisionStatus.SOM_PROVISION_SUCCESS)
+    test_dev3.provision_state.bootloader_locked = True
+    test_dev3.provision_state.avb_perm_attr_set = True
+    test_dev3.provision_state.avb_locked = True
+    test_dev3.provision_state.som_provisioned = True
+
     self.device_map[self.TEST_SERIAL1] = test_dev1
     self.device_map[self.TEST_SERIAL2] = test_dev2
+    self.device_map[self.TEST_SERIAL3] = test_dev3
+
     serials = [self.TEST_SERIAL1, self.TEST_SERIAL2]
     mock_atft._GetSelectedSerials = MagicMock()
     mock_atft._GetSelectedSerials.return_value = serials
     mock_atft.atft_manager.atfa_dev = MagicMock()
     mock_atft._ShowWarning = MagicMock()
+    # We are operating with product key.
+    mock_atft.atft_manager.product_info = MagicMock()
+    mock_atft.atft_manager.som_info = None
+
     # User click No for reprovision.
     mock_atft._ShowWarning.return_value = False
     mock_atft.OnManualProvision(None)
-    mock_atft.atft_manager.Provision.assert_called_once_with(test_dev1)
+    mock_atft.atft_manager.Provision.assert_called_once_with(test_dev1, False)
     mock_atft._ShowWarning.assert_called_once()
 
     # User click yes.
@@ -1455,8 +1483,27 @@ class AtftTest(unittest.TestCase):
     mock_atft.atft_manager.Provision.reset_mock()
     mock_atft._ShowWarning.return_value = True
     mock_atft.OnManualProvision(None)
-    calls = [call(test_dev1), call(test_dev2)]
+    calls = [call(test_dev1, False), call(test_dev2, False)]
     mock_atft.atft_manager.Provision.assert_has_calls(calls)
+    mock_atft._ShowWarning.assert_called_once()
+
+    # Now operating in som mode
+    mock_atft._ShowWarning.reset_mock()
+    mock_atft.atft_manager.Provision.reset_mock()
+    mock_atft.atft_manager.product_info = None
+    mock_atft.atft_manager.som_info = MagicMock()
+    mock_atft._GetSelectedSerials.return_value = [self.TEST_SERIAL3]
+    # User click No for reprovision.
+    mock_atft._ShowWarning.return_value = False
+    mock_atft.OnManualProvision(None)
+    mock_atft.atft_manager.Provision.assert_not_called()
+    mock_atft._ShowWarning.assert_called_once()
+    # User click yes.
+    mock_atft._ShowWarning.reset_mock()
+    mock_atft.atft_manager.Provision.reset_mock()
+    mock_atft._ShowWarning.return_value = True
+    mock_atft.OnManualProvision(None)
+    mock_atft.atft_manager.Provision.assert_called_with(test_dev2, True)
     mock_atft._ShowWarning.assert_called_once()
 
   def testManualProvisionExceptions(self):
@@ -2157,13 +2204,13 @@ class AtftTest(unittest.TestCase):
     mock_atft._CheckProvisionSteps()
     mock_atft._SendAlertEvent.assert_not_called()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test [step1], [step1, step2], [step1, step2, step3] ...
-    for i in range(1, len(mock_atft.DEFAULT_PROVISION_STEPS)):
+    for i in range(1, len(mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT)):
       provision_steps = []
-      for j in range(0, i):
-        provision_steps.append(mock_atft.DEFAULT_PROVISION_STEPS[j])
+      for j in range(i):
+        provision_steps.append(mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT[j])
       mock_atft.PROVISION_STEPS = provision_steps
       mock_atft._CheckProvisionSteps()
       mock_atft._SendAlertEvent.assert_not_called()
@@ -2179,7 +2226,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft._SendAlertEvent.reset_mock()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test invalid operation.
     mock_atft.PROVISION_STEPS = ['1234']
@@ -2187,7 +2234,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft._SendAlertEvent.reset_mock()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Even if TEST_MODE is true, syntax error is still failure.
     mock_atft.TEST_MODE = True
@@ -2196,14 +2243,14 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft._SendAlertEvent.reset_mock()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     mock_atft.PROVISION_STEPS = ['1234']
     mock_atft._CheckProvisionSteps()
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft._SendAlertEvent.reset_mock()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
   def testCheckProvisionStepsSecurityReq(self):
     # Test cases when the provision steps do not meet security requirement.
@@ -2215,7 +2262,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft._SendAlertEvent.reset_mock()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test fuse perm attr when already fused.
     mock_atft.PROVISION_STEPS = ['FuseVbootKey', 'FusePermAttr', 'FusePermAttr']
@@ -2223,7 +2270,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft._SendAlertEvent.reset_mock()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test LockAvb when vboot key is not fused.
     mock_atft.PROVISION_STEPS = ['LockAvb']
@@ -2231,7 +2278,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft._SendAlertEvent.reset_mock()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test LockAvb when perm attr not fused.
     mock_atft.PROVISION_STEPS = ['FuseVbootKey', 'LockAvb']
@@ -2239,16 +2286,16 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft._SendAlertEvent.reset_mock()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test provision when perm attr not fused.
     mock_atft.PROVISION_STEPS = [
-        'FuseVbootKey', 'LockAvb', 'Provision']
+        'FuseVbootKey', 'LockAvb', 'ProvisionProduct']
     mock_atft._CheckProvisionSteps()
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft._SendAlertEvent.reset_mock()
     self.assertEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # All the tests should succeed if TEST_MODE is set to True
 
@@ -2258,36 +2305,36 @@ class AtftTest(unittest.TestCase):
     mock_atft._CheckProvisionSteps()
     mock_atft._SendAlertEvent.assert_not_called()
     self.assertNotEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test fuse perm attr when already fused.
     mock_atft.PROVISION_STEPS = ['FuseVbootKey', 'FusePermAttr', 'FusePermAttr']
     mock_atft._CheckProvisionSteps()
     mock_atft._SendAlertEvent.assert_not_called()
     self.assertNotEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test LockAvb when vboot key is not fused.
     mock_atft.PROVISION_STEPS = ['LockAvb']
     mock_atft._CheckProvisionSteps()
     mock_atft._SendAlertEvent.assert_not_called()
     self.assertNotEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test LockAvb when perm attr not fused.
     mock_atft.PROVISION_STEPS = ['FuseVbootKey', 'LockAvb']
     mock_atft._CheckProvisionSteps()
     mock_atft._SendAlertEvent.assert_not_called()
     self.assertNotEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
     # Test provision when perm attr not fused.
     mock_atft.PROVISION_STEPS = [
-        'FuseVbootKey', 'LockAvb', 'Provision']
+        'FuseVbootKey', 'LockAvb', 'ProvisionProduct']
     mock_atft._CheckProvisionSteps()
     mock_atft._SendAlertEvent.assert_not_called()
     self.assertNotEqual(
-        mock_atft.DEFAULT_PROVISION_STEPS, mock_atft.PROVISION_STEPS)
+        mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
 
 
 
