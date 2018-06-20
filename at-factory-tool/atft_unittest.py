@@ -54,6 +54,11 @@ class MockAtft(atft.Atft):
     self.LANGUAGE = 'ENG'
     self.REBOOT_TIMEOUT = 1.0
     self.PRODUCT_ATTRIBUTE_FILE_EXTENSION = '*.atpa'
+    # Disable the test mode. (This mode is just for usage test, not unit test)
+    self.TEST_MODE = False
+    self.PROVISION_STEPS = ["FuseVbootKey", "FusePermAttr", "LockAvb",
+                            "Provision"]
+
     return {}
 
   def _MockCreateThread(self, target, *args):
@@ -110,8 +115,6 @@ class AtftTest(unittest.TestCase):
     self.test_text_window = ''
     self.atfa_keys = None
     self.device_map = {}
-    # Disable the test mode. (This mode is just for usage test, not unit test)
-    atft.TEST_MODE = False
 
   def AppendTargetDevice(self, device):
     self.test_target_devs.append(device)
@@ -399,6 +402,7 @@ class AtftTest(unittest.TestCase):
     mock_atft = MockAtft()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.PROVISION_SUCCESS)
+    test_dev1.provision_state.provisioned = True
     test_dev2 = TestDeviceInfo(self.TEST_SERIAL2, self.TEST_LOCATION1,
                                ProvisionStatus.IDLE)
     mock_atft.atft_manager.target_devs = []
