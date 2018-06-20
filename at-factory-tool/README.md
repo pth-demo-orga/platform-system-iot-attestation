@@ -98,6 +98,8 @@ guide](https://support.google.com/androidpartners_things/answer/9023873?hl=en&re
     *   fastboot.exe
     *   AdbWinApi.dll
     *   AdbWinUsbApi.dll
+    *   operation\_start\_p256.bin
+    *   operation\_start\_x25519.bin
 
 1.  Now just copy the 'AThings-Factory-Tool' folder to the workstation you want
     to use it. To use the tool, execute the exe file 'atft.exe' under
@@ -172,9 +174,11 @@ guide](https://support.google.com/androidpartners_things/answer/9023873?hl=en&re
     *   All image files (*.png)
     *   config.json
     *   NOTICE
-    *   MODULE_LICENSE_APACHE2
+    *   MODULE\_LICENSE\_APACHE2
     *   README.md (if exists)
     *   fastboot
+    *   operation\_start\_p256.bin
+    *   operation\_start\_x25519.bin
 
 1.  Now just copy the 'AThings-Factory-Tool' folder to the workstation you want
     to use it. To use the tool, execute the file 'atft' under
@@ -193,10 +197,10 @@ This package contains the following open source software:
 
 *   Python Packages:
 
-    *   wxPython 4.0.0a2 - https://www.wxpython.org/pages/license/
+    *   wxPython 4.0.2 - https://www.wxpython.org/pages/license/
     *   PyInstaller 3.2.1 - http://www.pyinstaller.org/license.html
     *   sh 1.12.14 - https://github.com/amoffat/sh/blob/master/LICENSE.txt
-    *   six 1.10.0 - https://github.com/benjaminp/six/blob/master/LICENSE
+    *   six 1.11.0 - https://github.com/benjaminp/six/blob/master/LICENSE
     *   future 0.16.0 - http://python-future.org/credits.html#licence
     *   pypiwin32 219 -
         https://github.com/mhammond/pywin32/blob/master/win32/License.txt
@@ -212,3 +216,7 @@ For more information on Microsoft Visual C++ redistributable files, see:
 
 *   https://msdn.microsoft.com/en-us/library/ms235299(v=vs.90).aspx
 *   https://msdn.microsoft.com/en-us/library/8kche8ah(v=vs.90).aspx
+
+The package uses tcl/tk8.5, see:
+
+*   https://www.tcl.tk/software/tcltk/license.html
