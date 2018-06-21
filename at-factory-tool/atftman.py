@@ -69,6 +69,9 @@ class ProvisionStatus(object):
   PROVISION_ING     = (50 + _PROCESSING)
   PROVISION_SUCCESS = (50 + _SUCCESS)
   PROVISION_FAILED  = (50 + _FAILED)
+  UNLOCKAVB_ING     = (60 + _PROCESSING)
+  UNLOCKAVB_SUCCESS = (60 + _SUCCESS)
+  UNLOCKAVB_FAILED  = (60 + _FAILED)
 
   STRING_MAP = {
     IDLE              : ['Idle', '初始'],
@@ -87,7 +90,10 @@ class ProvisionStatus(object):
     LOCKAVB_FAILED    : ['Lock AVB Failed', '锁定AVB失败'],
     PROVISION_ING     : ['Provisioning Key', '传输密钥中...'],
     PROVISION_SUCCESS : ['Success', '成功!'],
-    PROVISION_FAILED  : ['Provision Failed', '传输密钥失败']
+    PROVISION_FAILED  : ['Provision Failed', '传输密钥失败'],
+    UNLOCKAVB_ING     : ['Unlocking AVB', '解锁AVB中...'],
+    UNLOCKAVB_SUCCESS : ['AVB Unlocked', '已解锁AVB'],
+    UNLOCKAVB_FAILED  : ['Unlock AVB Failed', '解锁AVB失败']
 
   }
 
@@ -109,11 +115,27 @@ class ProvisionStatus(object):
 
 
 class ProvisionState(object):
-  """The provision state of the target device."""
+  """The provision state of the target device.
+
+  Attributes:
+    bootloader_locked: Whether bootloader is locked.
+    avb_perm_attr_set: Whether permanent attribute is set.
+    avb_locked: Whether avb is locked.
+    provisioned: Whether the device has product key provisioned.
+  """
   bootloader_locked = False
   avb_perm_attr_set = False
   avb_locked = False
   provisioned = False
+
+  def __eq__(self, other):
+    return (self.bootloader_locked == other.bootloader_locked and
+            self.avb_perm_attr_set == other.avb_perm_attr_set and
+            self.avb_locked == other.avb_locked and
+            self.provisioned == other.provisioned)
+
+  def __ne__(self, other):
+    return not self.__eq__(other)
 
 
 class ProductInfo(object):
@@ -268,6 +290,7 @@ class AtftManager(object):
     """
     # The timeout period for ATFA device reboot.
     self.ATFA_REBOOT_TIMEOUT = 30
+    self.UNLOCK_CREDENTIAL = None
     if configs:
       if 'ATFA_REBOOT_TIMEOUT' in configs:
         try:
@@ -280,6 +303,9 @@ class AtftManager(object):
           self.COMPATIBLE_ATFA_VERSION = int(configs['COMPATIBLE_ATFA_VERSION'])
         except ValueError:
           pass
+
+      if 'UNLOCK_CREDENTIAL' in configs:
+        self.UNLOCK_CREDENTIAL = configs['UNLOCK_CREDENTIAL']
 
     # The serial numbers for the devices that are at least seen twice.
     self.stable_serials = []
@@ -743,6 +769,27 @@ class AtftManager(object):
         raise FastbootFailure('Status not updated')
     except FastbootFailure as e:
       target.provision_status = ProvisionStatus.LOCKAVB_FAILED
+      raise e
+
+  def UnlockAvb(self, target):
+    """Unlock the android verified boot for the target.
+
+    Args:
+      target: The target device.
+    Raises:
+      FastbootFailure: When fastboot command fails.
+    """
+    try:
+      target.provision_status = ProvisionStatus.UNLOCKAVB_ING
+      unlock_command = 'at-unlock-vboot'
+      if self.UNLOCK_CREDENTIAL:
+        unlock_command += ' ' + self.UNLOCK_CREDENTIAL
+      target.Oem(unlock_command)
+      self.CheckProvisionStatus(target)
+      if target.provision_state.avb_locked:
+        raise FastbootFailure('Status not updated')
+    except FastbootFailure as e:
+      target.provision_status = ProvisionStatus.UNLOCKAVB_FAILED
       raise e
 
   def Reboot(self, target, timeout, success_callback, timeout_callback):

@@ -20,6 +20,7 @@ This tool allows for easy graphical access to common ATFA commands.  It also
 locates Fastboot devices and can initiate communication between the ATFA and
 an Android Things device.
 """
+import copy
 from datetime import datetime
 import json
 import math
@@ -29,6 +30,7 @@ import threading
 import time
 
 from atftman import AtftManager
+from atftman import ProvisionState
 from atftman import ProvisionStatus
 from atftman import RebootCallback
 
@@ -782,6 +784,19 @@ class Atft(wx.Frame):
   LANGUAGE_CONFIGS = ['eng', 'cn']
 
   def __init__(self):
+    # If this is set to True, no prerequisites would be checked against manual
+    # operation, such as you can do key provisioning before fusing the vboot key.
+    self.TEST_MODE = False
+
+    self.PROVISION_STEPS = []
+
+    # The default steps included in the auto provisioning process.
+    self.DEFAULT_PROVISION_STEPS = [
+      'FuseVbootKey', 'FusePermAttr', 'LockAvb', 'Provision']
+
+    # The available provision steps.
+    self.AVAILABLE_PROVISION_STEPS = [
+        'FuseVbootKey', 'FusePermAttr', 'LockAvb', 'Provision', 'UnlockAvb']
 
     self.configs = self.ParseConfigFile()
 
@@ -853,6 +868,8 @@ class Atft(wx.Frame):
     if not self.log.log_dir_file:
       self._SendAlertEvent(self.ALERT_FAIL_TO_CREATE_LOG)
 
+    self._CheckProvisionSteps()
+
     self.ShowStartScreen()
     self.StartRefreshingDevices()
 
@@ -898,14 +915,6 @@ class Atft(wx.Frame):
     for i in range(0, self.TARGET_DEV_SIZE):
       self.device_usb_locations.append(None)
 
-    # If this is set to True, no prerequisites would be checked against manual
-    # operation, such as you can do key provisioning before fusing the vboot key.
-    self.TEST_MODE = False
-
-    # The steps included in the auto provisioning process.
-    self.PROVISION_STEPS = ["FuseVbootKey", "FusePermAttr", "LockAvb",
-                            "Provision"]
-
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
     if not os.path.exists(config_file_path):
       return None
@@ -945,6 +954,74 @@ class Atft(wx.Frame):
       return None
 
     return configs
+
+  def _CheckProvisionSteps(self):
+    """Check whether the "PROVISION_STEPS" config is valid.
+
+    Check the format of "PROVISION_STEPS" config. If TEST_MODE is not set to
+    True, verify that the customized provision steps meet the necessary security
+    requirement.
+    """
+    if not self.PROVISION_STEPS:
+      self.PROVISION_STEPS = self.DEFAULT_PROVISION_STEPS
+      return
+    try:
+      provision_steps_verified = (
+          self._VerifyProvisionSteps(self.PROVISION_STEPS))
+    except ValueError:
+      self.PROVISION_STEPS = self.DEFAULT_PROVISION_STEPS
+      self._SendAlertEvent(self.ALERT_PROVISION_STEPS_SYNTAX_ERROR)
+      return
+
+    if self.TEST_MODE:
+      return
+    if not provision_steps_verified:
+      self.PROVISION_STEPS = self.DEFAULT_PROVISION_STEPS
+      self._SendAlertEvent(self.ALERT_PROVISION_STEPS_SECURITY_REQ)
+
+
+  def _VerifyProvisionSteps(self, provision_steps):
+    """Verify if the customized provision steps meet security requirements.
+
+    Args:
+      provision_steps: The customized provision steps to verify.
+    Raises:
+      ValueError: If the syntax for provision_steps is not correct.
+    """
+    if not isinstance(provision_steps, list):
+      raise ValueError()
+    provision_state = ProvisionState()
+    for operation in provision_steps:
+      if operation not in self.AVAILABLE_PROVISION_STEPS:
+        raise ValueError()
+      if operation == 'FuseVbootKey':
+        provision_state.bootloader_locked = True
+        continue
+      elif operation == 'FusePermAttr':
+        if (not provision_state.bootloader_locked or
+            provision_state.avb_perm_attr_set):
+          return False
+        else:
+          provision_state.avb_perm_attr_set = True
+          continue
+      elif operation == 'LockAvb':
+        if (not provision_state.bootloader_locked or
+            not provision_state.avb_perm_attr_set):
+          return False
+        else:
+          provision_state.avb_locked = True
+        continue
+      elif operation == 'UnlockAvb':
+        provision_state.avb_locked = False
+        continue
+      elif operation == 'Provision':
+        if (not provision_state.bootloader_locked or
+            not provision_state.avb_perm_attr_set or
+            provision_state.provisioned):
+          return False
+        else:
+          provision_state.provisioned = True
+    return True
 
   def _StoreConfigToFile(self):
     """Store the configuration to the configuration file.
@@ -1154,6 +1231,10 @@ class Atft(wx.Frame):
         'Cannot lock android verified boot for device that is not fused '
         'permanent attributes or already locked!',
         '无法锁定一个没有烧录过产品信息或者已经锁定AVB的设备！'][index]
+    self.ALERT_UNLOCKAVB_UNLOCKED = [
+        'Cannot unlock android verified boot for device that is already '
+        'unlocked!',
+        '无法解锁一个已经解锁AVB的设备'][index]
     self.ALERT_PROV_PROVED = [
         'Cannot provision device that is not ready for provisioning or '
         'already provisioned!',
@@ -1242,6 +1323,16 @@ class Atft(wx.Frame):
             'do you want to reprovision a new key?',
         lambda device:
             '设备' + str(device) + '中已经有一个密钥，是否覆盖？'][index]
+    self.ALERT_PROVISION_STEPS_SYNTAX_ERROR = [
+        'Config "PROVISION_STEPS" is not an array or contains unsupported '
+        'operations',
+        '设置项"PROVISION_STEPS"不是一个数组或者包含不支持的步骤'][index]
+    self.ALERT_PROVISION_STEPS_SECURITY_REQ = [
+        'Config "PROVISION_STEPS" does not meet the necessary security '
+        'requirement, please check again or set TEST_MODE to true if you are '
+        'really sure what you are doing.',
+        '设置项"PROVISION_STEPS"不符合必要的信息安全要求，请检查或者设定TEST_MODE为True'
+        '如果你明确此行为带来的后果.'][index]
 
     self.STATUS_MAPPED = ['Mapped', '已关联位置'][index]
     self.STATUS_NOT_MAPPED = ['Not mapped', '未关联位置'][index]
@@ -2316,7 +2407,7 @@ class Atft(wx.Frame):
     self.StopRefresh()
     self.Destroy()
 
-  def _is_provision_success(self, target):
+  def _is_provision_steps_finished(self, provision_state):
     """Check if the target device has successfully finished provision steps.
 
     Args:
@@ -2325,17 +2416,23 @@ class Atft(wx.Frame):
       success if the target device has already gone through the provision steps
       successfully.
     """
-    if len(self.PROVISION_STEPS) == 0:
-      return True;
-    if self.PROVISION_STEPS[-1] == 'Provision':
-      return target.provision_state.provisioned
-    if self.PROVISION_STEPS[-1] == 'LockAvb':
-      return target.provision_state.avb_locked
-    if self.PROVISION_STEPS[-1] == 'FusePermAttr':
-      return target.provision_state.avb_perm_attr_set
-    if self.PROVISION_STEPS[-1] == 'FuseVbootKey':
-      return target.provision_state.bootloader_locked
-    return True;
+    final_state = copy.deepcopy(provision_state)
+    for operation in self.PROVISION_STEPS:
+      if operation == 'FuseVbootKey':
+        final_state.bootloader_locked = True
+        continue
+      elif operation == 'FusePermAttr':
+        final_state.avb_perm_attr_set = True
+        continue
+      elif operation == 'LockAvb':
+        final_state.avb_locked = True
+        continue
+      elif operation == 'UnlockAvb':
+        final_state.avb_locked = False
+        continue
+      elif operation == 'Provision':
+        final_state.provisioned = True
+    return (provision_state == final_state);
 
   def _HandleAutoProv(self):
     """Do the state transition for devices if in auto provisioning mode.
@@ -2344,7 +2441,7 @@ class Atft(wx.Frame):
     # All idle devices -> waiting.
     for target_dev in self.atft_manager.target_devs:
       if (target_dev.serial_number not in self.auto_dev_serials and
-          not self._is_provision_success(target_dev) and
+          not self._is_provision_steps_finished(target_dev.provision_state) and
           not ProvisionStatus.isFailed(target_dev.provision_status)
           ):
         self.auto_dev_serials.append(target_dev.serial_number)
@@ -2740,6 +2837,7 @@ class Atft(wx.Frame):
     for i in range(0, self.TARGET_DEV_SIZE):
       serial_text = ''
       status = None
+      state = None
       serial_number = None
       if self.device_usb_locations[i]:
         for target_dev in target_devs:
@@ -2748,9 +2846,10 @@ class Atft(wx.Frame):
             serial_text = (
                 self.FIELD_SERIAL_NUMBER + ': ' + str(serial_number))
             status = target_dev.provision_status
-      self._ShowTargetDevice(i, serial_number, serial_text, status)
+            state = target_dev.provision_state
+      self._ShowTargetDevice(i, serial_number, serial_text, status, state)
 
-  def _ShowTargetDevice(self, i, serial_number, serial_text, status):
+  def _ShowTargetDevice(self, i, serial_number, serial_text, status, state):
     """Display information about one target device.
 
     Args:
@@ -2758,11 +2857,12 @@ class Atft(wx.Frame):
       serial_nubmer: The serial number of the device.
       serial_text: The serial number text to be displayed.
       status: The provision status.
+      state: The provision state.
     """
     dev_component = self.target_dev_components[i]
     dev_component.serial_text.SetLabel(serial_text)
     dev_component.serial_number = serial_number
-    color = self._GetStatusColor(status)
+    color = self._GetStatusColor(status, state)
     if status != None:
       dev_component.status.SetLabel(
           ProvisionStatus.ToString(status, self.GetLanguageIndex()))
@@ -2772,11 +2872,12 @@ class Atft(wx.Frame):
     dev_component.status_background.SetBackgroundColour(color)
     dev_component.status_background.Refresh()
 
-  def _GetStatusColor(self, status):
+  def _GetStatusColor(self, status, state):
     """Get the color according to the status.
 
     Args:
       status: The target device status.
+      state: The target device provision state.
     Returns:
       The color to be shown for the status.
     """
@@ -2784,7 +2885,7 @@ class Atft(wx.Frame):
       return self.COLOR_GREY
     if status == ProvisionStatus.IDLE:
       return self.COLOR_GREY
-    if status == ProvisionStatus.PROVISION_SUCCESS:
+    if self._is_provision_steps_finished(state):
       return self.COLOR_GREEN
     if ProvisionStatus.isFailed(status):
       return self.COLOR_RED
@@ -3160,6 +3261,46 @@ class Atft(wx.Frame):
 
     self._SendOperationSucceedEvent(operation, target)
 
+  def _UnlockAvb(self, selected_serials):
+    """Unlock android verified boot for selected devices.
+
+    Args:
+      selected_serials: The list of serial numbers for the selected devices.
+    """
+    pending_targets = []
+    for serial in selected_serials:
+      target = self.atft_manager.GetTargetDevice(serial)
+      if not target:
+        continue
+      if (self.TEST_MODE or target.provision_state.avb_locked):
+        target.provision_status = ProvisionStatus.WAITING
+        pending_targets.append(target)
+      else:
+        self._SendAlertEvent(self.ALERT_UNLOCKAVB_UNLOCKED)
+
+    for target in pending_targets:
+      self._UnlockAvbTarget(target)
+
+  def _UnlockAvbTarget(self, target):
+    """Unlock android verified boot for the specific target device.
+
+    Args:
+      target: The target device DeviceInfo object.
+    """
+    operation = 'Unlock android verified boot'
+    if not self._StartOperation(operation, target):
+      return
+
+    try:
+      self.atft_manager.UnlockAvb(target)
+    except FastbootFailure as e:
+      self._HandleException('E', e, operation)
+      return
+    finally:
+      self._EndOperation(target)
+
+    self._SendOperationSucceedEvent(operation, target)
+
   def _CheckLowKeyAlert(self):
     """Check whether the attestation key is lower than the threshold.
 
@@ -3308,9 +3449,11 @@ class Atft(wx.Frame):
             operation == 'FusePermAttr'):
         self._FusePermAttrTarget(target)
         continue
-      elif (not target.provision_state.avb_locked and
-            operation == 'LockAvb'):
+      elif (not target.provision_state.avb_locked and operation == 'LockAvb'):
         self._LockAvbTarget(target)
+        continue
+      elif (target.provision_state.avb_locked and operation == 'UnlockAvb'):
+        self._UnlockAvbTarget(target)
         continue
       elif (not target.provision_state.provisioned and
             operation == 'Provision'):
