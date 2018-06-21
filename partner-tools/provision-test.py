@@ -332,7 +332,7 @@ def _parse_inner_ca_request_product(data, session_params):
     try:
       pubkey = subprocess.check_output(['openssl', 'x509', '-pubkey',
                                         '-in', 'tmp/som_cert_0.bin',
-                                        '-inform', 'DER', '--noout'])
+                                        '-inform', 'DER', '-noout'])
       with open('tmp/pubkey.pem', 'wb') as f:
         f.write(pubkey)
       digest_algorithm = '-sha512'
