@@ -24,6 +24,8 @@ from datetime import datetime
 import json
 import os
 import re
+import struct
+import sys
 import tempfile
 import threading
 import uuid
@@ -37,7 +39,39 @@ from fastboot_exceptions import OsVersionNotCompatibleException
 from fastboot_exceptions import ProductAttributesFileFormatError
 from fastboot_exceptions import ProductNotSpecifiedException
 
+
 BOOTLOADER_STRING = '(bootloader) '
+_ECDH_KEY_LEN = 33
+_VAR_LEN = 4
+_HEADER_LEN = 8
+_GCM_IV_LEN = 12
+_GCM_TAG_LEN = 16
+_HASH_LEN = 32
+_HKDF_HASH_LEN = 16
+_OPERATIONS = {'ISSUE': 2, 'ISSUE_ENC': 3, 'ISSUE_SOM': 4, 'ISSUE_ENC_SOM': 5}
+
+
+def _GetCurrentPath():
+  if getattr(sys, 'frozen', False):
+    # we are running in a bundle
+    path = sys._MEIPASS  # pylint: disable=protected-access
+  else:
+    # we are running in a normal Python environment
+    path = os.path.dirname(os.path.abspath(__file__))
+  return path
+
+
+def _GetVarLen(data, index):
+  """Reads the 4 byte little endian unsigned integer at data[index].
+
+  Args:
+    data: Start of bytearray
+    index: Offset that indicates where the integer begins
+
+  Returns:
+    Little endian unsigned integer at data[index]
+  """
+  return struct.unpack('<I', data[index:index + 4])[0]
 
 
 class EncryptionAlgorithm(object):
@@ -48,52 +82,58 @@ class EncryptionAlgorithm(object):
 
 class ProvisionStatus(object):
   """The provision status constant."""
-  _PROCESSING        = 0
-  _SUCCESS           = 1
-  _FAILED            = 2
+  _PROCESSING           = 0
+  _SUCCESS              = 1
+  _FAILED               = 2
 
-  IDLE              = 0
-  WAITING           = 1
-  FUSEVBOOT_ING     = (10 + _PROCESSING)
-  FUSEVBOOT_SUCCESS = (10 + _SUCCESS)
-  FUSEVBOOT_FAILED  = (10 + _FAILED)
-  REBOOT_ING        = (20 + _PROCESSING)
-  REBOOT_SUCCESS    = (20 + _SUCCESS)
-  REBOOT_FAILED     = (20 + _FAILED)
-  FUSEATTR_ING      = (30 + _PROCESSING)
-  FUSEATTR_SUCCESS  = (30 + _SUCCESS)
-  FUSEATTR_FAILED   = (30 + _FAILED)
-  LOCKAVB_ING       = (40 + _PROCESSING)
-  LOCKAVB_SUCCESS   = (40 + _SUCCESS)
-  LOCKAVB_FAILED    = (40 + _FAILED)
-  PROVISION_ING     = (50 + _PROCESSING)
-  PROVISION_SUCCESS = (50 + _SUCCESS)
-  PROVISION_FAILED  = (50 + _FAILED)
-  UNLOCKAVB_ING     = (60 + _PROCESSING)
-  UNLOCKAVB_SUCCESS = (60 + _SUCCESS)
-  UNLOCKAVB_FAILED  = (60 + _FAILED)
+  IDLE                  = 0
+  WAITING               = 1
+  FUSEVBOOT_ING         = (10 + _PROCESSING)
+  FUSEVBOOT_SUCCESS     = (10 + _SUCCESS)
+  FUSEVBOOT_FAILED      = (10 + _FAILED)
+  REBOOT_ING            = (20 + _PROCESSING)
+  REBOOT_SUCCESS        = (20 + _SUCCESS)
+  REBOOT_FAILED         = (20 + _FAILED)
+  FUSEATTR_ING          = (30 + _PROCESSING)
+  FUSEATTR_SUCCESS      = (30 + _SUCCESS)
+  FUSEATTR_FAILED       = (30 + _FAILED)
+  LOCKAVB_ING           = (40 + _PROCESSING)
+  LOCKAVB_SUCCESS       = (40 + _SUCCESS)
+  LOCKAVB_FAILED        = (40 + _FAILED)
+  PROVISION_ING         = (50 + _PROCESSING)
+  PROVISION_SUCCESS     = (50 + _SUCCESS)
+  PROVISION_FAILED      = (50 + _FAILED)
+  UNLOCKAVB_ING         = (60 + _PROCESSING)
+  UNLOCKAVB_SUCCESS     = (60 + _SUCCESS)
+  UNLOCKAVB_FAILED      = (60 + _FAILED)
+  SOM_PROVISION_ING     = (70 + _PROCESSING)
+  SOM_PROVISION_SUCCESS = (70 + _SUCCESS)
+  SOM_PROVISION_FAILED  = (70 + _FAILED)
 
   STRING_MAP = {
-    IDLE              : ['Idle', '初始'],
-    WAITING           : ['Waiting', '等待'],
-    FUSEVBOOT_ING     : ['Fusing VbootKey...', '烧录引导密钥中...'],
-    FUSEVBOOT_SUCCESS : ['Bootloader Locked', '已烧录引导密钥'],
-    FUSEVBOOT_FAILED  : ['Lock Vboot Failed', '烧录引导密钥失败'],
-    REBOOT_ING        : ['Rebooting...', '重启设备中...'],
-    REBOOT_SUCCESS    : ['Rebooted', '已重启设备'],
-    REBOOT_FAILED     : ['Reboot Failed', '重启设备失败'],
-    FUSEATTR_ING      : ['Fusing PermAttr', '烧录产品信息中...'],
-    FUSEATTR_SUCCESS  : ['PermAttr Fused', '已烧录产品信息'],
-    FUSEATTR_FAILED   : ['Fuse PermAttr Failed', '烧录产品信息失败'],
-    LOCKAVB_ING       : ['Locking AVB', '锁定AVB中...'],
-    LOCKAVB_SUCCESS   : ['AVB Locked', '已锁定AVB'],
-    LOCKAVB_FAILED    : ['Lock AVB Failed', '锁定AVB失败'],
-    PROVISION_ING     : ['Provisioning Key', '传输密钥中...'],
-    PROVISION_SUCCESS : ['Success', '成功!'],
-    PROVISION_FAILED  : ['Provision Failed', '传输密钥失败'],
-    UNLOCKAVB_ING     : ['Unlocking AVB', '解锁AVB中...'],
-    UNLOCKAVB_SUCCESS : ['AVB Unlocked', '已解锁AVB'],
-    UNLOCKAVB_FAILED  : ['Unlock AVB Failed', '解锁AVB失败']
+    IDLE                  : ['Idle', '初始'],
+    WAITING               : ['Waiting', '等待'],
+    FUSEVBOOT_ING         : ['Fusing VbootKey...', '烧录引导密钥中...'],
+    FUSEVBOOT_SUCCESS     : ['Bootloader Locked', '已烧录引导密钥'],
+    FUSEVBOOT_FAILED      : ['Lock Vboot Failed', '烧录引导密钥失败'],
+    REBOOT_ING            : ['Rebooting...', '重启设备中...'],
+    REBOOT_SUCCESS        : ['Rebooted', '已重启设备'],
+    REBOOT_FAILED         : ['Reboot Failed', '重启设备失败'],
+    FUSEATTR_ING          : ['Fusing PermAttr', '烧录产品信息中...'],
+    FUSEATTR_SUCCESS      : ['PermAttr Fused', '已烧录产品信息'],
+    FUSEATTR_FAILED       : ['Fuse PermAttr Failed', '烧录产品信息失败'],
+    LOCKAVB_ING           : ['Locking AVB', '锁定AVB中...'],
+    LOCKAVB_SUCCESS       : ['AVB Locked', '已锁定AVB'],
+    LOCKAVB_FAILED        : ['Lock AVB Failed', '锁定AVB失败'],
+    PROVISION_ING         : ['Giving Key', '传输密钥中...'],
+    PROVISION_SUCCESS     : ['Success', '成功!'],
+    PROVISION_FAILED      : ['Provision Failed', '传输密钥失败'],
+    UNLOCKAVB_ING         : ['Unlocking AVB', '解锁AVB中...'],
+    UNLOCKAVB_SUCCESS     : ['AVB Unlocked', '已解锁AVB'],
+    UNLOCKAVB_FAILED      : ['Unlock AVB Failed', '解锁AVB失败'],
+    SOM_PROVISION_ING     : ['Giving SoMKey', '传输SoM密钥中...'],
+    SOM_PROVISION_SUCCESS : ['SoM Key Stored', 'SoM密钥已传输!'],
+    SOM_PROVISION_FAILED  : ['SoM Key Failed', '传输SoM密钥失败']
 
   }
 
@@ -126,13 +166,15 @@ class ProvisionState(object):
   bootloader_locked = False
   avb_perm_attr_set = False
   avb_locked = False
-  provisioned = False
+  product_provisioned = False
+  som_provisioned = False
 
   def __eq__(self, other):
     return (self.bootloader_locked == other.bootloader_locked and
             self.avb_perm_attr_set == other.avb_perm_attr_set and
             self.avb_locked == other.avb_locked and
-            self.provisioned == other.provisioned)
+            self.product_provisioned == other.product_provisioned and
+            self.som_provisioned == other.som_provisioned)
 
   def __ne__(self, other):
     return not self.__eq__(other)
@@ -151,6 +193,20 @@ class ProductInfo(object):
     self.product_id = product_id
     self.product_name = product_name
     self.product_attributes = product_attributes
+    self.vboot_key = vboot_key
+
+
+class SomInfo(object):
+  """The information about a SoM.
+
+  Attributes:
+    som_id: The id for the som.
+    som_name: The name for the som.
+  """
+
+  def __init__(self, som_id, som_name, vboot_key):
+    self.som_id = som_id
+    self.som_name = som_name
     self.vboot_key = vboot_key
 
 
@@ -258,6 +314,25 @@ class RebootCallback(object):
     timer.cancel()
 
 
+class _AtapSessionParameters(object):
+  """Atap session parameters.
+
+  Modified from the same structure in provision-test.py.
+
+  Attributes:
+    private_key: The key exchange private key.
+    public_key: The key exchange public key.
+    device_pub_key: The public key sent from the device.
+    shared_key: The computed shared key.
+  """
+
+  def __init__(self):
+    self.private_key = bytes()
+    self.public_key = bytes()
+    self.device_pub_key = bytes()
+    self.shared_key = bytes()
+
+
 class AtftManager(object):
   """The manager to implement ATFA tasks.
 
@@ -276,6 +351,7 @@ class AtftManager(object):
   JSON_PRODUCT_ATTRIBUTE = 'productPermanentAttribute'
   JSON_PRODUCT_ATTRIBUTE = 'productPermanentAttribute'
   JSON_VBOOT_KEY = 'bootloaderPublicKey'
+  JSON_SOM_ID = 'somId'
 
   def __init__(self, fastboot_device_controller, serial_mapper, configs):
     """Initialize attributes and store the supplied fastboot_device_controller.
@@ -317,6 +393,8 @@ class AtftManager(object):
     self.target_devs = []
     # The product information for the selected product.
     self.product_info = None
+    # The som information for the selected som.
+    self.som_info = None
      # The atfa device manager.
     self._atfa_dev_manager = AtfaDeviceManager(self)
     # The fastboot controller.
@@ -332,8 +410,8 @@ class AtftManager(object):
       return None
     return self.atfa_dev.keys_left
 
-  def UpdateATFAKeysLeft(self):
-    return self._atfa_dev_manager.UpdateKeysLeft()
+  def UpdateATFAKeysLeft(self, is_som_key):
+    return self._atfa_dev_manager.UpdateKeysLeft(is_som_key)
 
   def RebootATFA(self):
     return self._atfa_dev_manager.Reboot()
@@ -347,8 +425,8 @@ class AtftManager(object):
   def UpdateATFA(self):
     return self._atfa_dev_manager.Update()
 
-  def PurgeATFAKey(self):
-    return self._atfa_dev_manager.PurgeKey()
+  def PurgeATFAKey(self, is_som_key):
+    return self._atfa_dev_manager.PurgeKey(is_som_key)
 
   def PrepareFile(self, file_type):
     return self._atfa_dev_manager.PrepareFile(file_type)
@@ -561,7 +639,6 @@ class AtftManager(object):
     Raises:
       FastbootFailure: When fastboot command fails.
     """
-    at_attest_uuid = target_dev.GetVar('at-attest-uuid')
     state_string = target_dev.GetVar('at-vboot-state')
 
     target_dev.provision_status = ProvisionStatus.IDLE
@@ -569,13 +646,18 @@ class AtftManager(object):
 
     status_set = False
 
-    # TODO(shanyu): We only need empty string here
-    # NOT_PROVISIONED is for test purpose.
-    if at_attest_uuid and at_attest_uuid != 'NOT_PROVISIONED':
-      target_dev.at_attest_uuid = at_attest_uuid
-      target_dev.provision_status = ProvisionStatus.PROVISION_SUCCESS
-      status_set = True
-      target_dev.provision_state.provisioned = True
+    try:
+      at_attest_uuid = target_dev.GetVar('at-attest-uuid')
+      # TODO(shanyu): We only need empty string here
+      # NOT_PROVISIONED is for test purpose.
+      if at_attest_uuid and at_attest_uuid != 'NOT_PROVISIONED':
+        target_dev.at_attest_uuid = at_attest_uuid
+        target_dev.provision_status = ProvisionStatus.PROVISION_SUCCESS
+        status_set = True
+        target_dev.provision_state.product_provisioned = True
+    except FastbootFailure:
+      # Some board might gives error if at-attest-uuid is not set.
+      pass
 
     # state_string should be in format:
     # (bootloader) bootloader-locked: 1
@@ -593,6 +675,8 @@ class AtftManager(object):
         status_set = True
       target_dev.provision_state.avb_locked = True
 
+    status_set = self.CheckSomKeyStatus(target_dev, status_set)
+
     if (state_map.get('avb-perm-attr-set') and
         state_map['avb-perm-attr-set'] == '1'):
       if not status_set:
@@ -605,6 +689,68 @@ class AtftManager(object):
       if not status_set:
         target_dev.provision_status = ProvisionStatus.FUSEVBOOT_SUCCESS
       target_dev.provision_state.bootloader_locked = True
+
+  def CheckSomKeyStatus(self, target_dev, status_set):
+    """Checks whether the target device has som key.
+
+    Args:
+      target_dev: The target device (DeviceInfo).
+      status_set: Whether a successful status has already been set.
+    Return: Whether contains som key.
+    """
+
+    tmp_file = tempfile.NamedTemporaryFile(delete=False)
+    tmp_file.close()
+    ca_request_file = tmp_file.name
+    try:
+      algorithm_list = self._GetAlgorithmList(target_dev)
+      algorithm = self._ChooseAlgorithm(algorithm_list)
+      if algorithm == EncryptionAlgorithm.ALGORITHM_CURVE25519:
+        op_start_file = os.path.join(
+            _GetCurrentPath(), 'operation_start_x25519.bin')
+      else:
+        op_start_file = os.path.join(
+            _GetCurrentPath(), 'operation_start_p256.bin')
+      target_dev.Download(op_start_file)
+      target_dev.Oem('at-get-ca-request')
+      target_dev.Upload(ca_request_file)
+    except (FastbootFailure, NoAlgorithmAvailableException):
+      # If some command fail while trying to check som key status, we assume
+      # som key is not there
+      os.unlink(ca_request_file)
+      return status_set
+
+    try:
+      file_size = os.path.getsize(ca_request_file)
+    except os.error:
+      os.unlink(ca_request_file)
+      return status_set
+    os.unlink(ca_request_file)
+    # cleartext header                            8
+    # cleartext device ephemeral public key       33
+    # cleartext GCM IV                            12
+    # cleartext inner ca request length           4
+    # encrypted header                            8
+    # encrypted SOM key certificate chain         variable
+    # encrypted SOM key authentication signature  variable
+    # encrypted product ID SHA256 hash            32
+    # encrypted RSA public key                    variable
+    # encrypted ECDSA public key                  variable
+    # encrypted edDSA public key                  variable
+    # cleartext GCM tag                           16
+    min_message_length = (
+        _HEADER_LEN + _ECDH_KEY_LEN + _GCM_IV_LEN + _VAR_LEN + _HEADER_LEN +
+        _VAR_LEN + _VAR_LEN + _HASH_LEN + _VAR_LEN + _VAR_LEN +
+        _VAR_LEN + _GCM_TAG_LEN)
+    # TODO: We only check response size here. Need to add more robust check.
+    # If size is larger than minimum size, something is in the key cert field.
+    if file_size > min_message_length:
+      target_dev.provision_state.som_provisioned = True
+      if not status_set:
+        target_dev.provision_status = ProvisionStatus.SOM_PROVISION_SUCCESS
+      return True
+    else:
+      return status_set
 
   def TransferContent(self, src, dst):
     """Transfer content from a device to another device.
@@ -648,7 +794,7 @@ class AtftManager(object):
 
     return None
 
-  def Provision(self, target):
+  def Provision(self, target, is_som_key):
     """Provision the key to the target device.
 
     1. Get supported encryption algorithm
@@ -662,12 +808,16 @@ class AtftManager(object):
 
     Args:
       target: The target device to be provisioned to.
+      is_som_key: Whether provision som key (or product key).
     Raises:
       DeviceNotFoundException: When a device is not available.
       FastbootFailure: When fastboot command fails.
     """
     try:
-      target.provision_status = ProvisionStatus.PROVISION_ING
+      if not is_som_key:
+        target.provision_status = ProvisionStatus.PROVISION_ING
+      else:
+        target.ProvisionStatus = ProvisionStatus.SOM_PROVISION_ING
       atfa = self.atfa_dev
       AtftManager.CheckDevice(atfa)
       # Set the ATFA's time first.
@@ -675,7 +825,11 @@ class AtftManager(object):
       algorithm_list = self._GetAlgorithmList(target)
       algorithm = self._ChooseAlgorithm(algorithm_list)
       # First half of the DH key exchange
-      atfa.Oem('start-provisioning ' + str(algorithm))
+      if not is_som_key:
+        atfa.Oem('start-provisioning ' + str(algorithm))
+      else:
+        atfa.Oem('start-provisioning ' + str(algorithm) +
+                 ' ' + str(_OPERATIONS['ISSUE_SOM']))
       self.TransferContent(atfa, target)
       # Second half of the DH key exchange
       target.Oem('at-get-ca-request')
@@ -688,10 +842,15 @@ class AtftManager(object):
 
       # After a success provision, the status should be updated.
       self.CheckProvisionStatus(target)
-      if not target.provision_state.provisioned:
+      if not is_som_key and not target.provision_state.product_provisioned:
+        raise FastbootFailure('Status not updated.')
+      if is_som_key and not target.provision_state.som_provisioned:
         raise FastbootFailure('Status not updated.')
     except (FastbootFailure, DeviceNotFoundException) as e:
-      target.provision_status = ProvisionStatus.PROVISION_FAILED
+      if not is_som_key:
+        target.provision_status = ProvisionStatus.PROVISION_FAILED
+      else:
+        target.provision_status = ProvisionStatus.SOM_PROVISION_FAILED
       raise e
 
   def FuseVbootKey(self, target):
@@ -703,7 +862,11 @@ class AtftManager(object):
       FastbootFailure: When fastboot command fails.
       ProductNotSpecified Exception: When product is not specified.
     """
-    if not self.product_info:
+    if self.product_info:
+      vboot_key = self.product_info.vboot_key
+    elif self.som_info:
+      vboot_key = self.som_info.vboot_key
+    else:
       target.provision_status = ProvisionStatus.FUSEVBOOT_FAILED
       raise ProductNotSpecifiedException
 
@@ -711,7 +874,7 @@ class AtftManager(object):
     target.provision_status = ProvisionStatus.FUSEVBOOT_ING
     try:
       temp_file = tempfile.NamedTemporaryFile(delete=False)
-      temp_file.write(self.product_info.vboot_key)
+      temp_file.write(vboot_key)
       temp_file.close()
       temp_file_name = temp_file.name
       target.Download(temp_file_name)
@@ -901,6 +1064,8 @@ class AtftManager(object):
       Options are ALGORITHM_P256 or ALGORITHM_CURVE25519
     """
     at_attest_dh = target.GetVar('at-attest-dh')
+    if not at_attest_dh:
+      return []
     algorithm_strings = at_attest_dh.split(',')
     algorithm_list = []
     for algorithm_string in algorithm_strings:
@@ -929,16 +1094,25 @@ class AtftManager(object):
 
     raise NoAlgorithmAvailableException()
 
-  def ProcessProductAttributesFile(self, content):
-    """Process the product attributes file.
+  def ProcessAttributesFile(self, content):
+    """Process the product/som attributes file.
 
-    The file should follow the following JSON format:
+    The product file should follow the following JSON format:
       {
         "productName": "",
         "productDescription": "",
         "productConsoleId": "",
         "productPermanentAttribute": "",
         "bootloaderPublicKey": "",
+        "creationTime": ""
+      }
+
+    The som file should follow the following JSON format:
+      {
+        "productName": "",
+        "productDescription": "",
+        "productConsoleId": "",
+        "somId": "",
         "creationTime": ""
       }
 
@@ -955,28 +1129,43 @@ class AtftManager(object):
     product_name = file_object.get(self.JSON_PRODUCT_NAME)
     attribute_string = file_object.get(self.JSON_PRODUCT_ATTRIBUTE)
     vboot_key_string = file_object.get(self.JSON_VBOOT_KEY)
-    if not product_name or not attribute_string or not vboot_key_string:
+    som_id_string = file_object.get(self.JSON_SOM_ID)
+    if (not product_name or
+        (not attribute_string and not som_id_string) or not vboot_key_string):
       raise ProductAttributesFileFormatError(
           'Essential field missing!')
     try:
-      attribute = base64.standard_b64decode(attribute_string)
-      attribute_array = bytearray(attribute)
-      if self.EXPECTED_ATTRIBUTE_LENGTH != len(attribute_array):
-        raise ProductAttributesFileFormatError(
-            'Incorrect permanent product attributes length')
-
-      # We only need the last 16 byte for product ID
-      # We store the hex representation of the product ID
-      product_id = self._ByteToHex(attribute_array[-16:])
-
       vboot_key_array = bytearray(base64.standard_b64decode(vboot_key_string))
-
     except TypeError:
-      raise ProductAttributesFileFormatError(
-          'Incorrect Base64 encoding for permanent product attributes')
+        raise ProductAttributesFileFormatError(
+            'Incorrect Base64 encoding for verified boot key')
 
-    self.product_info = ProductInfo(product_id, product_name, attribute_array,
-                                    vboot_key_array)
+    # Clear previous information.
+    self.product_info = None
+    self.som_info = None
+    if attribute_string:
+      # This is a product attribute file.
+      try:
+        attribute = base64.standard_b64decode(attribute_string)
+        attribute_array = bytearray(attribute)
+        if self.EXPECTED_ATTRIBUTE_LENGTH != len(attribute_array):
+          raise ProductAttributesFileFormatError(
+              'Incorrect permanent product attributes length')
+
+        # We only need the last 16 byte for product ID
+        # We store the hex representation of the product ID
+        product_id = self._ByteToHex(attribute_array[-16:])
+
+      except TypeError:
+        raise ProductAttributesFileFormatError(
+            'Incorrect Base64 encoding for permanent product attributes')
+
+      self.product_info = ProductInfo(product_id, product_name, attribute_array,
+                                      vboot_key_array)
+    else:
+      # This is a som attribute file
+      self.som_info = SomInfo(som_id_string, product_name, vboot_key_array)
+
 
   def _ByteToHex(self, byte_array):
     """Transform a byte array into a hex string."""
@@ -1060,24 +1249,31 @@ class AtfaDeviceManager(object):
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     self.atft_manager.atfa_dev.Oem('shutdown')
 
-  def UpdateKeysLeft(self):
+  def UpdateKeysLeft(self, is_som_key):
     """Update the number of available AT keys for the current product.
 
     Need to use GetCachedATFAKeysLeft() function to get the number of keys left.
     If some error happens, keys_left would be set to -1 to prevent checking
     again.
 
+    Args:
+      is_som_key: Whether checking number of som keys (or product keys).
     Raises:
       FastbootFailure: When fastboot command fails.
       ProductNotSpecifiedException: When product is not specified.
     """
-    if not self.atft_manager.product_info:
+    if not is_som_key and self.atft_manager.product_info:
+      product_som_id = self.atft_manager.product_info.product_id
+      command = 'num-keys '
+    elif is_som_key and self.atft_manager.som_info:
+      product_som_id = self.atft_manager.som_info.som_id
+      command = 'num-som-keys '
+    else:
       raise ProductNotSpecifiedException()
 
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
     try:
-      out = self.atft_manager.atfa_dev.Oem(
-          'num-keys ' + self.atft_manager.product_info.product_id, True)
+      out = self.atft_manager.atfa_dev.Oem(command + product_som_id, True)
       # Note: use splitlines instead of split('\n') to prevent '\r\n' problem on
       # windows.
       for line in out.splitlines():
@@ -1101,19 +1297,26 @@ class AtfaDeviceManager(object):
         self.atft_manager.atfa_dev.keys_left = -1
         raise e
 
-  def PurgeKey(self):
+  def PurgeKey(self, is_som_key):
     """Purge the key for the product
 
+    Args:
+      is_som_key: Whether to purge som key (or product key).
     Raises:
       DeviceNotFoundException: When the device is not found.
       FastbootFailure: When fastboot command fails.
       ProductNotSpecifiedException: When product is not specified.
     """
-    if not self.atft_manager.product_info:
+    if not is_som_key and self.product_info:
+      product_som_id = self.atft_manager.product_info.product_id
+      command = 'purge '
+    elif is_som_key and self.som_info:
+      product_som_id = self.atft_manager.som_info.som_id
+      command = 'purge-som '
+    else:
       raise ProductNotSpecifiedException()
     AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    self.atft_manager.atfa_dev.Oem(
-        'purge ' + self.atft_manager.product_info.product_id)
+    self.atft_manager.atfa_dev.Oem(command + product_som_id)
 
   def SetTime(self):
     """Inject the host time into the ATFA device.

@@ -791,12 +791,15 @@ class Atft(wx.Frame):
     self.PROVISION_STEPS = []
 
     # The default steps included in the auto provisioning process.
-    self.DEFAULT_PROVISION_STEPS = [
-      'FuseVbootKey', 'FusePermAttr', 'LockAvb', 'Provision']
+    self.DEFAULT_PROVISION_STEPS_PRODUCT = [
+        'FuseVbootKey', 'FusePermAttr', 'LockAvb', 'ProvisionProduct']
+
+    self.DEFAULT_PROVISION_STEPS_SOM = ['FuseVbootKey', 'ProvisionSom']
 
     # The available provision steps.
     self.AVAILABLE_PROVISION_STEPS = [
-        'FuseVbootKey', 'FusePermAttr', 'LockAvb', 'Provision', 'UnlockAvb']
+        'FuseVbootKey', 'FusePermAttr', 'LockAvb', 'ProvisionProduct',
+        'UnlockAvb', 'ProvisionSom']
 
     self.configs = self.ParseConfigFile()
 
@@ -868,8 +871,6 @@ class Atft(wx.Frame):
     if not self.log.log_dir_file:
       self._SendAlertEvent(self.ALERT_FAIL_TO_CREATE_LOG)
 
-    self._CheckProvisionSteps()
-
     self.ShowStartScreen()
     self.StartRefreshingDevices()
 
@@ -912,7 +913,7 @@ class Atft(wx.Frame):
     # The list to store the device location for each target device slot. If the
     # slot is not mapped, it will be None.
     self.device_usb_locations = []
-    for i in range(0, self.TARGET_DEV_SIZE):
+    for i in range(self.TARGET_DEV_SIZE):
       self.device_usb_locations.append(None)
 
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
@@ -962,21 +963,26 @@ class Atft(wx.Frame):
     True, verify that the customized provision steps meet the necessary security
     requirement.
     """
+    if self.atft_manager.product_info:
+      default_provision_steps = self.DEFAULT_PROVISION_STEPS_PRODUCT
+    else:
+      default_provision_steps = self.DEFAULT_PROVISION_STEPS_SOM
+
     if not self.PROVISION_STEPS:
-      self.PROVISION_STEPS = self.DEFAULT_PROVISION_STEPS
+      self.PROVISION_STEPS = default_provision_steps
       return
     try:
       provision_steps_verified = (
           self._VerifyProvisionSteps(self.PROVISION_STEPS))
     except ValueError:
-      self.PROVISION_STEPS = self.DEFAULT_PROVISION_STEPS
+      self.PROVISION_STEPS = default_provision_steps
       self._SendAlertEvent(self.ALERT_PROVISION_STEPS_SYNTAX_ERROR)
       return
 
     if self.TEST_MODE:
       return
     if not provision_steps_verified:
-      self.PROVISION_STEPS = self.DEFAULT_PROVISION_STEPS
+      self.PROVISION_STEPS = default_provision_steps
       self._SendAlertEvent(self.ALERT_PROVISION_STEPS_SECURITY_REQ)
 
 
@@ -1014,13 +1020,20 @@ class Atft(wx.Frame):
       elif operation == 'UnlockAvb':
         provision_state.avb_locked = False
         continue
-      elif operation == 'Provision':
+      elif operation == 'ProvisionProduct':
         if (not provision_state.bootloader_locked or
             not provision_state.avb_perm_attr_set or
-            provision_state.provisioned):
+            provision_state.product_provisioned):
           return False
         else:
-          provision_state.provisioned = True
+          provision_state.product_provisioned = True
+      elif operation == 'ProvisionSom':
+        if (not provision_state.bootloader_locked or
+            not provision_state.avb_perm_attr_set or
+            provision_state.som_provisioned):
+          return False
+        else:
+          provision_state.som_provisioned = True
     return True
 
   def _StoreConfigToFile(self):
@@ -1056,7 +1069,7 @@ class Atft(wx.Frame):
     Returns:
       index: A index representing the language.
     """
-    for index in range(0, len(self.LANGUAGE_CONFIGS)):
+    for index in range(len(self.LANGUAGE_CONFIGS)):
       if self.LANGUAGE == self.LANGUAGE_CONFIGS[index]:
         return index
     return -1
@@ -1104,6 +1117,7 @@ class Atft(wx.Frame):
 
     # Area titles
     self.TITLE_ATFA_DEV = ['ATFA Device: ', 'ATFA 设备： '][index]
+    self.TITLE_SOM_NAME = 'SoM: '
     self.TITLE_PRODUCT_NAME = ['Product: ', '产品： '][index]
     self.TITLE_PRODUCT_NAME_NOTCHOSEN = ['Not Chosen', '未选择'][index]
     self.TITLE_KEYS_LEFT = ['Attestation Keys Left:', '剩余密钥:'][index]
@@ -1562,17 +1576,16 @@ class Atft(wx.Frame):
         wx.EVT_BUTTON, self._OnToggleSupMode, self.button_supervisor_toggle)
 
     # Product Name Display
-    product_name_title = wx.StaticText(
-        header_panel, wx.ID_ANY, self.TITLE_PRODUCT_NAME)
+    self.product_name_title = wx.StaticText(header_panel, wx.ID_ANY, '')
     self.product_name_display = wx.StaticText(
         header_panel, wx.ID_ANY, self.TITLE_PRODUCT_NAME_NOTCHOSEN)
     product_name_font = wx.Font(16, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
-    product_name_title.SetFont(product_name_font)
+    self.product_name_title.SetFont(product_name_font)
     self.product_name_display.SetFont(product_name_font)
-    product_name_sizer = wx.BoxSizer(wx.HORIZONTAL)
-    product_name_sizer.Add(product_name_title)
-    product_name_sizer.Add(self.product_name_display, 0, wx.LEFT, 2)
-    header_panel_left_sizer.Add(product_name_sizer, 0, wx.ALL, 5)
+    self.product_name_sizer = wx.BoxSizer(wx.HORIZONTAL)
+    self.product_name_sizer.Add(self.product_name_title)
+    self.product_name_sizer.Add(self.product_name_display, 0, wx.LEFT, 2)
+    header_panel_left_sizer.Add(self.product_name_sizer, 0, wx.ALL, 5)
 
     self.main_box.Add(header_panel, 0, wx.EXPAND)
 
@@ -1790,7 +1803,7 @@ class Atft(wx.Frame):
       def __init__(self, index):
         self.index = index
 
-    for i in range(0, self.TARGET_DEV_SIZE):
+    for i in range(self.TARGET_DEV_SIZE):
       dev_component = DevComponent(i)
       # Create each target device panel.
       target_devs_output_panel = wx.Window(parent, style=wx.BORDER_RAISED)
@@ -1933,7 +1946,6 @@ class Atft(wx.Frame):
     self.refresh_timer = threading.Timer(self.DEVICE_REFRESH_INTERVAL,
                                          self.StartRefreshingDevices)
     self.refresh_timer.start()
-
     if self.refresh_pause_lock.acquire(False):
       # Semaphore > 0, refresh is still paused.
       self.refresh_pause_lock.release()
@@ -1999,8 +2011,9 @@ class Atft(wx.Frame):
     """Enter auto provisioning mode."""
     if self.auto_prov:
       return
-    if (self.atft_manager.atfa_dev and self.atft_manager.product_info and
-        self.atft_manager.GetCachedATFAKeysLeft() > 0):
+    if (self.atft_manager.atfa_dev and
+        self.atft_manager.GetCachedATFAKeysLeft() > 0 and
+        (self.atft_manager.product_info or self.atft_manager.som_info)):
       # If product info file is chosen and atfa device is present and there are
       # keys left. Enter auto provisioning mode.
       self.auto_prov = True
@@ -2015,7 +2028,7 @@ class Atft(wx.Frame):
     if not self.auto_prov:
       return
     self.auto_prov = False
-    for device in self.atft_manager.target_devs:
+    for device in self._GetTargetDevices():
       # Change all waiting devices' status to it's original state.
       if device.provision_status == ProvisionStatus.WAITING:
         self.atft_manager.CheckProvisionStatus(device)
@@ -2105,6 +2118,7 @@ class Atft(wx.Frame):
     if self._GetCachedATFAKeysLeft() == 0:
       self._SendAlertEvent(self.ALERT_PROV_NO_KEYS)
       return
+    is_som_key = (self.atft_manager.som_info is not None)
     for serial in selected_serials:
       target_dev = self.atft_manager.GetTargetDevice(serial)
       if not target_dev:
@@ -2116,13 +2130,15 @@ class Atft(wx.Frame):
           target_dev.provision_state.bootloader_locked and
           target_dev.provision_state.avb_perm_attr_set and
           target_dev.provision_state.avb_locked):
-        if (target_dev.provision_state.provisioned and
-            not self._ShowWarning(self.ALERT_REPROVISION(target_dev))):
-          continue
+        if ((target_dev.provision_state.product_provisioned and not is_som_key)
+            or
+            (target_dev.provision_state.som_provisioned and is_som_key)):
+          if not self._ShowWarning(self.ALERT_REPROVISION(target_dev)):
+            continue
         target_dev.provision_status = ProvisionStatus.WAITING
       else:
         self._SendAlertEvent(self.ALERT_PROV_PROVED)
-    self._CreateThread(self._ManualProvision, selected_serials)
+    self._CreateThread(self._ManualProvision, selected_serials, is_som_key)
 
   def OnCheckATFAStatus(self, event):
     """Check the attestation key status from ATFA device asynchronously.
@@ -2142,7 +2158,7 @@ class Atft(wx.Frame):
     if not selected_serials:
       self._SendAlertEvent(self.ALERT_FUSE_NO_SELECTED)
       return
-    if not self.atft_manager.product_info:
+    if not self.atft_manager.product_info and not self.atft_manager.som_info:
       self._SendAlertEvent(self.ALERT_FUSE_NO_PRODUCT)
       return
 
@@ -2234,7 +2250,7 @@ class Atft(wx.Frame):
     """
     message = self.DIALOG_CHOOSE_PRODUCT_ATTRIBUTE_FILE
     wildcard = self.PRODUCT_ATTRIBUTE_FILE_EXTENSION
-    callback = self.ProcessProductAttributesFile
+    callback = self.ProcessAttributesFile
     data = self.SelectFileArg(message, wildcard, callback)
     event = Event(self.select_file_event, value=data)
     wx.QueueEvent(self, event)
@@ -2243,24 +2259,40 @@ class Atft(wx.Frame):
     self.app_settings_dialog.CenterOnParent()
     self.app_settings_dialog.ShowModal()
 
-  def ProcessProductAttributesFile(self, pathname):
-    """Process the selected product attributes file.
+  def ProcessAttributesFile(self, pathname):
+    """Process the selected attributes file.
 
     Args:
-      pathname: The path for the product attributes file to parse.
+      pathname: The path for the attributes file to parse.
     """
     try:
       with open(pathname, 'r') as attribute_file:
         content = attribute_file.read()
-        self.atft_manager.ProcessProductAttributesFile(content)
+        self.atft_manager.ProcessAttributesFile(content)
         if self.start_screen_shown:
           self.HideStartScreen()
-        # Update the product name display
-        self.product_name_display.SetLabelText(
-            self.atft_manager.product_info.product_name)
+        name = ''
+        if self.atft_manager.product_info:
+          # product mode
+          self.product_name_title.SetLabel(self.TITLE_PRODUCT_NAME)
+          name = self.atft_manager.product_info.product_name
+        elif self.atft_manager.som_info:
+          # som mode
+          self.product_name_title.SetLabel(self.TITLE_SOM_NAME)
+          name = self.atft_manager.som_info.som_name
+
+        # Update the name display
+        self.product_name_display.SetLabel(name)
+        self.product_name_title.Refresh()
+        self.product_name_display.Refresh()
+        self.product_name_sizer.Layout()
+        self.main_box.Layout()
         # User choose a new product, reset how many keys left.
-        if self.atft_manager.atfa_dev and self.atft_manager.product_info:
+        if (self.atft_manager.atfa_dev and (
+              self.atft_manager.product_info or self.atft_manager.som_info)):
           self._UpdateKeysLeftInATFA()
+
+        self._CheckProvisionSteps()
     except IOError:
       self._SendAlertEvent(
           self.ALERT_CANNOT_OPEN_FILE + pathname.encode('utf-8'))
@@ -2430,8 +2462,11 @@ class Atft(wx.Frame):
       elif operation == 'UnlockAvb':
         final_state.avb_locked = False
         continue
-      elif operation == 'Provision':
-        final_state.provisioned = True
+      elif operation == 'ProvisionProduct':
+        final_state.product_provisioned = True
+        continue
+      elif operation == 'ProvisionSom':
+        final_state.som_provisioned = True
     return (provision_state == final_state);
 
   def _HandleAutoProv(self):
@@ -2439,7 +2474,7 @@ class Atft(wx.Frame):
 
     """
     # All idle devices -> waiting.
-    for target_dev in self.atft_manager.target_devs:
+    for target_dev in self._GetTargetDevices():
       if (target_dev.serial_number not in self.auto_dev_serials and
           not self._is_provision_steps_finished(target_dev.provision_state) and
           not ProvisionStatus.isFailed(target_dev.provision_status)
@@ -2456,7 +2491,9 @@ class Atft(wx.Frame):
     color = self.COLOR_BLACK
 
     try:
-      if not self.atft_manager.atfa_dev or not self.atft_manager.product_info:
+      if (not self.atft_manager.atfa_dev or (
+          not self.atft_manager.product_info and
+          not self.atft_manager.som_info)):
         raise DeviceNotFoundException
       keys_left = self.atft_manager.GetCachedATFAKeysLeft()
       if not keys_left and keys_left != 0:
@@ -2834,13 +2871,13 @@ class Atft(wx.Frame):
     """Print target devices to target device output area.
     """
     target_devs = self.atft_manager.target_devs
-    for i in range(0, self.TARGET_DEV_SIZE):
+    for i in range(self.TARGET_DEV_SIZE):
       serial_text = ''
       status = None
       state = None
       serial_number = None
       if self.device_usb_locations[i]:
-        for target_dev in target_devs:
+        for target_dev in self.atft_manager.target_devs:
           if target_dev.location == self.device_usb_locations[i]:
             serial_number = target_dev.serial_number
             serial_text = (
@@ -2848,6 +2885,15 @@ class Atft(wx.Frame):
             status = target_dev.provision_status
             state = target_dev.provision_state
       self._ShowTargetDevice(i, serial_number, serial_text, status, state)
+
+  def _GetTargetDevices(self):
+    target_devs = []
+    for target_dev in self.atft_manager.target_devs:
+      for i in range(self.TARGET_DEV_SIZE):
+        if (self.device_usb_locations[i] and
+            target_dev.location == self.device_usb_locations[i]):
+          target_devs.append(target_dev)
+    return target_devs
 
   def _ShowTargetDevice(self, i, serial_number, serial_text, status, state):
     """Display information about one target device.
@@ -3000,7 +3046,6 @@ class Atft(wx.Frame):
       finally:
         # 'Release the lock'.
         self.listing_device_lock.release()
-
       wx.QueueEvent(self, Event(self.dev_listed_event, wx.ID_ANY))
 
   def _UpdateKeysLeftInATFA(self):
@@ -3016,7 +3061,10 @@ class Atft(wx.Frame):
     self.PauseRefresh()
 
     try:
-      self.atft_manager.UpdateATFAKeysLeft()
+      if self.atft_manager.product_info:
+        self.atft_manager.UpdateATFAKeysLeft(False)
+      elif self.atft_manager.som_info:
+        self.atft_manager.UpdateATFAKeysLeft(True)
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException('W', e, operation)
@@ -3370,11 +3418,12 @@ class Atft(wx.Frame):
 
     self._SendOperationSucceedEvent(operation)
 
-  def _ManualProvision(self, selected_serials):
+  def _ManualProvision(self, selected_serials, is_som_key):
     """Manual provision the selected devices.
 
     Args:
       selected_serials: A list of the serial numbers of the target devices.
+      is_som_key: Whether provision som key (or product key).
     """
     # Reset alert_shown
     self.first_key_alert_shown = False
@@ -3384,20 +3433,23 @@ class Atft(wx.Frame):
       if not target_dev:
         continue
       if target_dev.provision_status == ProvisionStatus.WAITING:
-        self._ProvisionTarget(target_dev)
+        self._ProvisionTarget(target_dev, is_som_key)
 
-  def _ProvisionTarget(self, target):
+  def _ProvisionTarget(self, target, is_som_key):
     """Provision the attestation key into the specific target.
 
     Args:
       target: The target to be provisioned.
+      is_som_key: Whether provision som key (or product key).
     """
-    operation = 'Attestation Key Provisioning'
+    operation = 'Product Attestation Key Provisioning'
+    if is_som_key:
+      operation = 'SoM Attestation Key Provisioning'
     if not self._StartOperation(operation, target):
       return
 
     try:
-      self.atft_manager.Provision(target)
+      self.atft_manager.Provision(target, is_som_key)
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException('W', e, operation, target)
@@ -3411,9 +3463,10 @@ class Atft(wx.Frame):
       self._EndOperation(target)
 
     self._SendOperationSucceedEvent(operation, target)
-    self.log.Info(
-      'Key Provisioning',
-      'Device: ' + str(target) + ' AT-ATTEST-UUID: ' + target.at_attest_uuid)
+    if not is_som_key:
+      self.log.Info(
+        'Key Provisioning',
+        'Device: ' + str(target) + ' AT-ATTEST-UUID: ' + target.at_attest_uuid)
     self._CheckLowKeyAlert()
 
   def _HandleStateTransition(self, target):
@@ -3455,9 +3508,19 @@ class Atft(wx.Frame):
       elif (target.provision_state.avb_locked and operation == 'UnlockAvb'):
         self._UnlockAvbTarget(target)
         continue
-      elif (not target.provision_state.provisioned and
-            operation == 'Provision'):
-        self._ProvisionTarget(target)
+      elif (not target.provision_state.product_provisioned and
+            operation == 'ProvisionProduct'):
+        # Provision product key.
+        self._ProvisionTarget(target, False)
+        if self._GetCachedATFAKeysLeft() == 0:
+          # No keys left. If it's auto provisioning mode, exit.
+          self._SendAlertEvent(self.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
+          self.OnLeaveAutoProv()
+        continue
+      elif (not target.provision_state.som_provisioned and
+            operation == 'ProvisionSom'):
+        # Provision som key.
+        self._ProvisionTarget(target, True)
         if self._GetCachedATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
@@ -3484,7 +3547,7 @@ class Atft(wx.Frame):
       self._SendOperationSucceedEvent(operation)
 
       # Check ATFA status after new key stored.
-      if self.atft_manager.product_info:
+      if self.atft_manager.product_info or self.atft_manager.som_info:
         self._UpdateKeysLeftInATFA()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
@@ -3723,7 +3786,7 @@ class Atft(wx.Frame):
     index = event.GetValue().index
     # Check if the location is already mounted to a slot, if so gives a warning
     # since this mapping would overwrite previous configuration.
-    for i in range(0, self.TARGET_DEV_SIZE):
+    for i in range(self.TARGET_DEV_SIZE):
       if (self.device_usb_locations[i] and
           self.device_usb_locations[i] == location and i != index):
         warning_text = self.ALERT_REMAP_LOCATION_SLOT(
@@ -3758,7 +3821,7 @@ class Atft(wx.Frame):
     Args:
       language_text: The name of the language selected.
     """
-    for i in range(0, len(self.LANGUAGE_OPTIONS)):
+    for i in range(len(self.LANGUAGE_OPTIONS)):
       if self.LANGUAGE_OPTIONS[i] == language_text:
         self.LANGUAGE = self.LANGUAGE_CONFIGS[i]
         self._SendAlertEvent(

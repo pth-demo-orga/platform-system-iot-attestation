@@ -10,7 +10,7 @@ The Google Android Things Factory Tool (ATFT) helps factory partners with key
 provisioning and security related operations. It provides a user interface to
 issue commands between a product device and an Android Things Factory Appliance
 (ATFA). For detail please refer to [user
-guide](https://support.google.com/androidpartners_things/answer/7549162?hl=en&ref_topic=7394193).
+guide](https://support.google.com/androidpartners_things/answer/9023873?hl=en&ref_topic=7394193).
 
 # Build and Run
 
@@ -186,7 +186,7 @@ guide](https://support.google.com/androidpartners_things/answer/7549162?hl=en&re
 
 This package contains the following open source software:
 
-*   Android Things Factory Tool 1.0 -
+*   Android Things Factory Tool 2.0 -
     https://android.googlesource.com/platform/system/iot/attestation/+/master/NOTICE
 
 *   Python 2.7.13 - https://www.python.org/download/releases/2.7/license/

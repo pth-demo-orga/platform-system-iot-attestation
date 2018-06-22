@@ -22,6 +22,7 @@ from atftman import EncryptionAlgorithm
 from atftman import ProductInfo
 from atftman import ProvisionState
 from atftman import ProvisionStatus
+from atftman import SomInfo
 from fastboot_exceptions import DeviceCreationException
 from fastboot_exceptions import DeviceNotFoundException
 from fastboot_exceptions import FastbootFailure
@@ -33,6 +34,7 @@ from fastboot_exceptions import ProductNotSpecifiedException
 from mock import call
 from mock import MagicMock
 from mock import patch
+import os
 
 files = []
 
@@ -737,8 +739,22 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) 100\nTEST'
-    test_atfa_device_manager.UpdateKeysLeft()
+    test_atfa_device_manager.UpdateKeysLeft(False)
     mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
+    self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
+
+  def UpdateKeysLeftSom(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa_dev = MagicMock()
+    atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager.som_info = MagicMock()
+    atft_manager.som_info.som_id = self.TEST_ID
+    mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) 100\nTEST'
+    test_atfa_device_manager.UpdateKeysLeft(True)
+    mock_atfa_dev.Oem.assert_called_once_with('num-som-keys ' + self.TEST_ID,
+                                              True)
     self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
 
   def testUpdateKeysLeftCRLF(self):
@@ -750,7 +766,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\r\n(bootloader) 100\r\nTEST'
-    test_atfa_device_manager.UpdateKeysLeft()
+    test_atfa_device_manager.UpdateKeysLeft(False)
     mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
     self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
 
@@ -763,7 +779,7 @@ class AtftManTest(unittest.TestCase):
     test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
     mock_atfa_dev.Oem.return_value = 'TEST\r\n(bootloader) 100\r\nTEST'
     with self.assertRaises(ProductNotSpecifiedException):
-      test_atfa_device_manager.UpdateKeysLeft()
+      test_atfa_device_manager.UpdateKeysLeft(False)
 
   def testUpdateKeysLeftNoATFA(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
@@ -773,7 +789,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info.product_id = self.TEST_ID
     test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
     with self.assertRaises(DeviceNotFoundException):
-      test_atfa_device_manager.UpdateKeysLeft()
+      test_atfa_device_manager.UpdateKeysLeft(False)
 
   def testUpdateKeysLeftInvalidFormat(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
@@ -785,7 +801,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\nTEST'
     with self.assertRaises(FastbootFailure):
-      test_atfa_device_manager.UpdateKeysLeft()
+      test_atfa_device_manager.UpdateKeysLeft(False)
 
   def testUpdateKeysLeftInvalidNumber(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
@@ -797,7 +813,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) abcd\nTEST'
     with self.assertRaises(FastbootFailure):
-      test_atfa_device_manager.UpdateKeysLeft()
+      test_atfa_device_manager.UpdateKeysLeft(False)
 
   def testUpdateKeysLeftNoMatchingProduct(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
@@ -809,7 +825,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.side_effect = FastbootFailure(
         'No matching available products')
-    test_atfa_device_manager.UpdateKeysLeft()
+    test_atfa_device_manager.UpdateKeysLeft(False)
     self.assertEqual(0, mock_atfa_dev.keys_left)
 
   # Test AtftManager.CheckProvisionStatus
@@ -948,7 +964,7 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(False, mock_device.provision_state.bootloader_locked)
     self.assertEqual(False, mock_device.provision_state.avb_perm_attr_set)
     self.assertEqual(False, mock_device.provision_state.avb_locked)
-    self.assertEqual(False, mock_device.provision_state.provisioned)
+    self.assertEqual(False, mock_device.provision_state.product_provisioned)
 
     # Attestation key provisioned
     self.status_map['at-attest-uuid'] = self.TEST_UUID
@@ -956,7 +972,7 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(False, mock_device.provision_state.bootloader_locked)
     self.assertEqual(False, mock_device.provision_state.avb_perm_attr_set)
     self.assertEqual(False, mock_device.provision_state.avb_locked)
-    self.assertEqual(True, mock_device.provision_state.provisioned)
+    self.assertEqual(True, mock_device.provision_state.product_provisioned)
 
     # AVB locked and attestation key provisioned
     self.status_map['at-vboot-state'] = (
@@ -971,7 +987,7 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(False, mock_device.provision_state.bootloader_locked)
     self.assertEqual(False, mock_device.provision_state.avb_perm_attr_set)
     self.assertEqual(True, mock_device.provision_state.avb_locked)
-    self.assertEqual(True, mock_device.provision_state.provisioned)
+    self.assertEqual(True, mock_device.provision_state.product_provisioned)
     self.assertEqual(ProvisionStatus.PROVISION_SUCCESS,
                      mock_device.provision_status)
 
@@ -988,7 +1004,7 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(False, mock_device.provision_state.bootloader_locked)
     self.assertEqual(True, mock_device.provision_state.avb_perm_attr_set)
     self.assertEqual(False, mock_device.provision_state.avb_locked)
-    self.assertEqual(False, mock_device.provision_state.provisioned)
+    self.assertEqual(False, mock_device.provision_state.product_provisioned)
 
     # All status set
     self.status_map['at-vboot-state'] = (
@@ -1003,20 +1019,110 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(True, mock_device.provision_state.bootloader_locked)
     self.assertEqual(True, mock_device.provision_state.avb_perm_attr_set)
     self.assertEqual(True, mock_device.provision_state.avb_locked)
-    self.assertEqual(True, mock_device.provision_state.provisioned)
+    self.assertEqual(True, mock_device.provision_state.product_provisioned)
     self.assertEqual(ProvisionStatus.PROVISION_SUCCESS,
                      mock_device.provision_status)
+
+  @patch('os.path.getsize')
+  @patch('os.unlink')
+  @patch('tempfile.NamedTemporaryFile')
+  def testCheckSomStatusNotProvisioned(
+      self, mock_create_temp_file, mock_delete_file, mock_get_size):
+    mock_file = MagicMock()
+    mock_create_temp_file.return_value = mock_file
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa = MagicMock()
+    mock_device = MagicMock()
+    mock_device.provision_state = ProvisionState()
+    mock_get_size.return_value = 133
+    # return value for 'at-attest-dh'
+    mock_device.GetVar.return_value = '1:p256;'
+    result = atft_manager.CheckSomKeyStatus(mock_device, False)
+    mock_create_temp_file.assert_called_once()
+    mock_delete_file.assert_called_once_with(mock_file.name)
+    mock_device.GetVar.assert_called_once_with('at-attest-dh')
+    self.assertEqual(False, result)
+    self.assertEqual(False, mock_device.provision_state.som_provisioned)
+
+  @patch('os.path.getsize')
+  @patch('os.unlink')
+  @patch('tempfile.NamedTemporaryFile')
+  def testCheckSomStatusProvisioned(
+      self, mock_create_temp_file, mock_delete_file, mock_get_size):
+    mock_file = MagicMock()
+    mock_create_temp_file.return_value = mock_file
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa = MagicMock()
+    mock_device = MagicMock()
+    mock_device.provision_state = ProvisionState()
+    mock_get_size.return_value = 134
+    mock_device.GetVar.return_value = '1:p256;'
+    result = atft_manager.CheckSomKeyStatus(mock_device, False)
+    mock_create_temp_file.assert_called_once()
+    mock_delete_file.assert_called_once_with(mock_file.name)
+    mock_device.GetVar.assert_called_once_with('at-attest-dh')
+    self.assertEqual(True, result)
+    self.assertEqual(True, mock_device.provision_state.som_provisioned)
+    self.assertEqual(ProvisionStatus.SOM_PROVISION_SUCCESS,
+                     mock_device.provision_status)
+
+  @patch('os.path.getsize')
+  @patch('os.unlink')
+  @patch('tempfile.NamedTemporaryFile')
+  def testCheckSomStatusProductProvisioned(
+      self, mock_create_temp_file, mock_delete_file, mock_get_size):
+    mock_file = MagicMock()
+    mock_create_temp_file.return_value = mock_file
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa = MagicMock()
+    mock_device = MagicMock()
+    mock_device.provision_state = ProvisionState()
+    mock_device.provision_status = ProvisionStatus.PROVISION_SUCCESS
+    mock_get_size.return_value = 134
+    mock_device.GetVar.return_value = '1:p256;'
+    result = atft_manager.CheckSomKeyStatus(mock_device, True)
+    mock_create_temp_file.assert_called_once()
+    mock_delete_file.assert_called_once_with(mock_file.name)
+    mock_device.GetVar.assert_called_once_with('at-attest-dh')
+    self.assertEqual(True, result)
+    self.assertEqual(True, mock_device.provision_state.som_provisioned)
+    self.assertEqual(ProvisionStatus.PROVISION_SUCCESS,
+                     mock_device.provision_status)
+
+  @patch('os.path.getsize')
+  @patch('os.unlink')
+  @patch('tempfile.NamedTemporaryFile')
+  def testCheckSomStatusFileNotExist(
+      self, mock_create_temp_file, mock_delete_file, mock_get_size):
+    mock_file = MagicMock()
+    mock_create_temp_file.return_value = mock_file
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa = MagicMock()
+    mock_device = MagicMock()
+    mock_device.provision_state = ProvisionState()
+    mock_get_size.side_effect = os.error
+    result = atft_manager.CheckSomKeyStatus(mock_device, False)
+    mock_create_temp_file.assert_called_once()
+    mock_delete_file.assert_called_once_with(mock_file.name)
+    self.assertEqual(False, result)
+    self.assertEqual(False, mock_device.provision_state.som_provisioned)
+    self.assertNotEqual(ProvisionStatus.PROVISION_SUCCESS,
+                        mock_device.provision_status)
 
   # Test AtftManager.Provision
   def MockSetProvisionSuccess(self, target):
     target.provision_status = ProvisionStatus.PROVISION_SUCCESS
     target.provision_state = ProvisionState()
-    target.provision_state.provisioned = True
+    target.provision_state.product_provisioned = True
 
   def MockSetProvisionFail(self, target):
     target.provision_status = ProvisionStatus.PROVISION_FAILED
     target.provision_state = ProvisionState()
-    target.provision_state.provisioned = False
+    target.provision_state.product_provisioned = False
 
   def testProvision(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
@@ -1033,7 +1139,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.CheckProvisionStatus = MagicMock()
     atft_manager.CheckProvisionStatus.side_effect = self.MockSetProvisionSuccess
 
-    atft_manager.Provision(mock_target)
+    atft_manager.Provision(mock_target, False)
 
     # Make sure atfa.SetTime is called.
     atft_manager._atfa_dev_manager.SetTime.assert_called_once()
@@ -1071,7 +1177,78 @@ class AtftManTest(unittest.TestCase):
     atft_manager.CheckProvisionStatus = MagicMock()
     atft_manager.CheckProvisionStatus.side_effect = self.MockSetProvisionFail
     with self.assertRaises(FastbootFailure):
-      atft_manager.Provision(mock_target)
+      atft_manager.Provision(mock_target, False)
+
+  def MockSetProvisionSomSuccess(self, target):
+    target.provision_status = ProvisionStatus.SOM_PROVISION_SUCCESS
+    target.provision_state = ProvisionState()
+    target.provision_state.som_provisioned = True
+
+  def MockSetProvisionSomFail(self, target):
+    target.provision_status = ProvisionStatus.SOM_PROVISION_FAILED
+    target.provision_state = ProvisionState()
+    target.provision_state.som_provisioned = False
+
+  def testProvisionSom(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa = MagicMock()
+    mock_target = MagicMock()
+    atft_manager._atfa_dev_manager = MagicMock()
+    atft_manager.atfa_dev = mock_atfa
+    atft_manager._GetAlgorithmList = MagicMock()
+    atft_manager._GetAlgorithmList.return_value = [
+        EncryptionAlgorithm.ALGORITHM_CURVE25519
+    ]
+    atft_manager.TransferContent = MagicMock()
+    atft_manager.CheckProvisionStatus = MagicMock()
+    atft_manager.CheckProvisionStatus.side_effect = (
+        self.MockSetProvisionSomSuccess)
+
+    atft_manager.Provision(mock_target, True)
+
+    # Make sure atfa.SetTime is called.
+    atft_manager._atfa_dev_manager.SetTime.assert_called_once()
+    # Transfer content should be ATFA->target, target->ATFA, ATFA->target
+    transfer_content_calls = [
+        call(mock_atfa, mock_target),
+        call(mock_target, mock_atfa),
+        call(mock_atfa, mock_target)
+    ]
+    atft_manager.TransferContent.assert_has_calls(transfer_content_calls)
+    atfa_oem_calls = [
+        call('start-provisioning ' +
+             str(EncryptionAlgorithm.ALGORITHM_CURVE25519) + ' 4'),
+        call('finish-provisioning')
+    ]
+    target_oem_calls = [
+        call('at-get-ca-request'),
+        call('at-set-ca-response')
+    ]
+    mock_atfa.Oem.assert_has_calls(atfa_oem_calls)
+    mock_target.Oem.assert_has_calls(target_oem_calls)
+
+  def testProvisionSomFailed(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa = MagicMock()
+    mock_target = MagicMock()
+    atft_manager._atfa_dev_manager = MagicMock()
+    atft_manager.atfa_dev = mock_atfa
+    atft_manager._GetAlgorithmList = MagicMock()
+    atft_manager._GetAlgorithmList.return_value = [
+        EncryptionAlgorithm.ALGORITHM_CURVE25519
+    ]
+    atft_manager.TransferContent = MagicMock()
+    atft_manager.CheckProvisionStatus = MagicMock()
+    atft_manager.CheckProvisionStatus.side_effect = self.MockSetProvisionSomFail
+    with self.assertRaises(FastbootFailure):
+      atft_manager.Provision(mock_target, True)
+
+  def MockSetProvisionSomSuccess(self, target):
+    target.provision_status = ProvisionStatus.PROVISION_SUCCESS
+    target.provision_state = ProvisionState()
+    target.provision_state.som_provisioned = True
 
   # Test AtftManager.FuseVbootKey
   def MockSetFuseVbootSuccess(self, target):
@@ -1096,6 +1273,28 @@ class AtftManTest(unittest.TestCase):
     atft_manager.product_info = ProductInfo(
         self.TEST_ID, self.TEST_NAME, self.TEST_ATTRIBUTE_ARRAY,
         self.TEST_VBOOT_KEY_ARRAY)
+    mock_target = MagicMock()
+    atft_manager.CheckProvisionStatus = MagicMock()
+    atft_manager.CheckProvisionStatus.side_effect = self.MockSetFuseVbootSuccess
+
+    atft_manager.FuseVbootKey(mock_target)
+
+    mock_file.write.assert_called_once_with(self.TEST_VBOOT_KEY_ARRAY)
+    mock_target.Download.assert_called_once_with(self.TEST_FILE_NAME)
+    mock_remove.assert_called_once_with(self.TEST_FILE_NAME)
+    mock_target.Oem.assert_called_once_with('fuse at-bootloader-vboot-key')
+
+  @patch('os.remove')
+  @patch('tempfile.NamedTemporaryFile')
+  def testFuseVbootKeySom(self, mock_create_temp_file, mock_remove):
+    mock_file = MagicMock()
+    mock_create_temp_file.return_value = mock_file
+    mock_file.name = self.TEST_FILE_NAME
+
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    atft_manager.som_info = SomInfo(
+        self.TEST_ID, self.TEST_NAME, self.TEST_VBOOT_KEY_ARRAY)
     mock_target = MagicMock()
     atft_manager.CheckProvisionStatus = MagicMock()
     atft_manager.CheckProvisionStatus.side_effect = self.MockSetFuseVbootSuccess
@@ -1501,8 +1700,8 @@ class AtftManTest(unittest.TestCase):
     mock_success.assert_not_called()
     mock_fail.assert_not_called()
 
-  # Test AtftManager.ProcessProductAttributesFile
-  def testProcessProductAttributesFile(self):
+  # Test AtftManager.ProcessAttributesFile
+  def testProcessAttributesFile(self):
     test_content = (
         '{'
         '  "productName": "%s",'
@@ -1514,7 +1713,7 @@ class AtftManTest(unittest.TestCase):
                 self.TEST_VBOOT_KEY_STRING)
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
-    atft_manager.ProcessProductAttributesFile(test_content)
+    atft_manager.ProcessAttributesFile(test_content)
     self.assertEqual(self.TEST_NAME, atft_manager.product_info.product_name)
     self.assertEqual(self.TEST_ID, atft_manager.product_info.product_id)
     self.assertEqual(self.TEST_ATTRIBUTE_ARRAY,
@@ -1522,7 +1721,24 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(self.TEST_VBOOT_KEY_ARRAY,
                      atft_manager.product_info.vboot_key)
 
-  def testProcessProductAttributesFileWrongJSON(self):
+  def testProcessAttributesFileSom(self):
+    test_content = (
+        '{'
+        '  "productName": "%s",'
+        '  "productConsoleId": "%s",'
+        '  "somId": "%s",'
+        '  "bootloaderPublicKey": "%s",'
+        '  "creationTime": ""'
+        '}') % (self.TEST_NAME, self.TEST_ID, self.TEST_ID,
+                self.TEST_VBOOT_KEY_STRING)
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    atft_manager.ProcessAttributesFile(test_content)
+    self.assertEqual(self.TEST_NAME, atft_manager.som_info.som_name)
+    self.assertEqual(self.TEST_ID, atft_manager.som_info.som_id)
+    self.assertEqual(self.TEST_VBOOT_KEY_ARRAY, atft_manager.som_info.vboot_key)
+
+  def testProcessAttributesFileWrongJSON(self):
     test_content = (
         '{'
         '  "productName": "%s",'
@@ -1535,9 +1751,35 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     with self.assertRaises(ProductAttributesFileFormatError):
-      atft_manager.ProcessProductAttributesFile(test_content)
+      atft_manager.ProcessAttributesFile(test_content)
 
-  def testProcessProductAttributesFileMissingField(self):
+  def testProcessAttributesFileWrongJSONSomNoId(self):
+    test_content = (
+        '{'
+        '  "productName": "%s",'
+        '  "productConsoleId": "%s",'
+        '  "bootloaderPublicKey": "%s",'
+        '  "creationTime": ""'
+        '}') % (self.TEST_NAME, self.TEST_ID, self.TEST_VBOOT_KEY_STRING)
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    with self.assertRaises(ProductAttributesFileFormatError):
+      atft_manager.ProcessAttributesFile(test_content)
+
+  def testProcessAttributesFileWrongJSONSomNoVbootKey(self):
+    test_content = (
+        '{'
+        '  "productName": "%s",'
+        '  "productConsoleId": "%s",'
+        '  "somId": "%s",'
+        '  "creationTime": ""'
+        '}') % (self.TEST_NAME, self.TEST_ID, self.TEST_ID)
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    with self.assertRaises(ProductAttributesFileFormatError):
+      atft_manager.ProcessAttributesFile(test_content)
+
+  def testProcessAttributesFileMissingField(self):
     test_content = (
         '{'
         '  "productConsoleId": "%s",'
@@ -1549,9 +1791,9 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     with self.assertRaises(ProductAttributesFileFormatError):
-      atft_manager.ProcessProductAttributesFile(test_content)
+      atft_manager.ProcessAttributesFile(test_content)
 
-  def testProcessProductAttributesFileWrongLength(self):
+  def testProcessAttributesFileWrongLength(self):
     test_content = (
         '{'
         '  "productName": "%s",'
@@ -1565,9 +1807,9 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     with self.assertRaises(ProductAttributesFileFormatError) as e:
-      atft_manager.ProcessProductAttributesFile(test_content)
+      atft_manager.ProcessAttributesFile(test_content)
 
-  def testProcessProductAttributesFileWrongBase64(self):
+  def testProcessAttributesFileWrongBase64(self):
     test_content = (
         '{'
         '  "productName": "%s",'
@@ -1580,7 +1822,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     with self.assertRaises(ProductAttributesFileFormatError):
-      atft_manager.ProcessProductAttributesFile(test_content)
+      atft_manager.ProcessAttributesFile(test_content)
 
   # Test _AddNewAtfa
   def testAddNewAtfa(self):
