@@ -828,6 +828,66 @@ class AtftManTest(unittest.TestCase):
     test_atfa_device_manager.UpdateKeysLeft(False)
     self.assertEqual(0, mock_atfa_dev.keys_left)
 
+  def testUpdateKeysLeftNoMatchingSoM(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa_dev = MagicMock()
+    atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager.som_info = MagicMock()
+    atft_manager.som_info.som_id = self.TEST_ID
+    mock_atfa_dev.Oem.side_effect = FastbootFailure(
+        'No matching available SoMs')
+    test_atfa_device_manager.UpdateKeysLeft(True)
+    self.assertEqual(0, mock_atfa_dev.keys_left)
+
+  # Test AtfaDeviceManager.PurgeKey
+  def testPurgeKeyProduct(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa_dev = MagicMock()
+    atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager.product_info = MagicMock()
+    atft_manager.product_info.product_id = self.TEST_ID
+    test_atfa_device_manager.PurgeKey(False)
+    mock_atfa_dev.Oem.assert_called_once_with('purge ' + self.TEST_ID)
+
+  def testPurgeKeySoM(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa_dev = MagicMock()
+    atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager.som_info = MagicMock()
+    atft_manager.som_info.som_id = self.TEST_ID
+    test_atfa_device_manager.PurgeKey(True)
+    mock_atfa_dev.Oem.assert_called_once_with('purge-som ' + self.TEST_ID)
+
+  def testPurgeKeyProductNotSelected(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa_dev = MagicMock()
+    atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager.product_info = None
+    atft_manager.som_info = None
+    with self.assertRaises(ProductNotSpecifiedException):
+      test_atfa_device_manager.PurgeKey(False)
+    mock_atfa_dev.Oem.assert_not_called()
+
+  def testPurgeKeySoMNotSelected(self):
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    mock_atfa_dev = MagicMock()
+    atft_manager.atfa_dev = mock_atfa_dev
+    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager.product_info = None
+    atft_manager.som_info = None
+    with self.assertRaises(ProductNotSpecifiedException):
+      test_atfa_device_manager.PurgeKey(True)
+    mock_atfa_dev.Oem.assert_not_called()
+
   # Test AtftManager.CheckProvisionStatus
   def MockGetVar(self, variable):
     return self.status_map.get(variable)

@@ -1288,7 +1288,8 @@ class AtfaDeviceManager(object):
 
       raise FastbootFailure('ATFA device response has invalid format')
     except FastbootFailure as e:
-      if 'No matching available products' in e.msg:
+      if ('No matching available products' in e.msg or
+          'No matching available SoMs' in e.msg):
         # If there's no matching product key, we set keys left to 0.
         self.atft_manager.atfa_dev.keys_left = 0
         return
@@ -1307,10 +1308,10 @@ class AtfaDeviceManager(object):
       FastbootFailure: When fastboot command fails.
       ProductNotSpecifiedException: When product is not specified.
     """
-    if not is_som_key and self.product_info:
+    if not is_som_key and self.atft_manager.product_info:
       product_som_id = self.atft_manager.product_info.product_id
       command = 'purge '
-    elif is_som_key and self.som_info:
+    elif is_som_key and self.atft_manager.som_info:
       product_som_id = self.atft_manager.som_info.som_id
       command = 'purge-som '
     else:

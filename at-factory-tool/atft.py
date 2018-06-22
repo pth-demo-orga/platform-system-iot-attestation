@@ -3604,7 +3604,8 @@ class Atft(wx.Frame):
     if not self._StartOperation(operation, self.atft_manager.atfa_dev):
       return
     try:
-      self.atft_manager.PurgeATFAKey()
+      is_som_key = self.atft_manager.som_info is not None
+      self.atft_manager.PurgeATFAKey(is_som_key)
       self._SendOperationSucceedEvent(operation)
       self._UpdateKeysLeftInATFA()
     except ProductNotSpecifiedException as e:
