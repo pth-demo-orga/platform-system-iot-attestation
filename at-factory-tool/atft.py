@@ -1029,7 +1029,6 @@ class Atft(wx.Frame):
           provision_state.product_provisioned = True
       elif operation == 'ProvisionSom':
         if (not provision_state.bootloader_locked or
-            not provision_state.avb_perm_attr_set or
             provision_state.som_provisioned):
           return False
         else:
@@ -2292,6 +2291,14 @@ class Atft(wx.Frame):
               self.atft_manager.product_info or self.atft_manager.som_info)):
           self._UpdateKeysLeftInATFA()
 
+        # If user change from one mode to another mode, change the default
+        # provision steps.
+        if (self.PROVISION_STEPS == self.DEFAULT_PROVISION_STEPS_SOM and
+            self.atft_manager.product_info):
+          self.PROVISION_STEPS = self.DEFAULT_PROVISION_STEPS_PRODUCT
+        elif (self.PROVISION_STEPS == self.DEFAULT_PROVISION_STEPS_PRODUCT and
+              self.atft_manager.som_info):
+          self.PROVISION_STEPS = self.DEFAULT_PROVISION_STEPS_SOM
         self._CheckProvisionSteps()
     except IOError:
       self._SendAlertEvent(
