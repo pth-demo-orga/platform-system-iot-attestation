@@ -46,6 +46,8 @@ from fastboot_exceptions import ProductNotSpecifiedException
 
 from passlib.hash import pbkdf2_sha256
 
+import psutil
+
 import wx
 
 if sys.platform.startswith('linux'):
@@ -135,18 +137,12 @@ class AtftLog(object):
       except IOError:
         return
 
-    log_files = []
-    for file_name in os.listdir(self.log_dir):
-      if (os.path.isfile(os.path.join(self.log_dir, file_name)) and
-          file_name.startswith('atft_log_')):
-        log_files.append(file_name)
+    log_files = self._GetLogFiles()
     if not log_files:
       # Create the first log file.
       self._CreateLogFile()
     else:
-      log_files.sort()
       self.log_dir_file = os.path.join(self.log_dir, log_files.pop())
-    self.Info('Program', 'Program start')
 
   def Error(self, tag, string):
     """Print an error message to the log.
@@ -184,6 +180,39 @@ class AtftLog(object):
     """
     self._Output('I', tag, string)
 
+  def CheckInstanceRunning(self):
+    """Check whether there is already an instance of ATFT running.
+
+    We do this by checking the log file for 'Program start' without
+    'Program exit'.
+
+    Returns:
+      True if no other instance is running, false otherwise.
+    """
+    running_processes = []
+    for p in psutil.process_iter(attrs=['name', 'pid', 'ppid', 'cmdline']):
+      pname = p.info['name']
+      if ('atft.exe' == pname or 'atft' == pname in pname or
+          p.info['cmdline'] == ['python', 'atft.py']):
+        running_processes.append(p)
+
+    # Remove forked process.
+    dedup_running_processes = []
+    for p in running_processes:
+      dup = False
+      for p2 in running_processes:
+        if p.info['ppid'] == p2.info['pid']:
+          dup = True
+          break
+      if not dup:
+        dedup_running_processes.append(p)
+
+    # Current running process should be 1.
+    if len(dedup_running_processes) > 1:
+      return False
+    return True
+
+
   def _Output(self, code, tag, string):
     """Output a line of message to the log file.
 
@@ -203,6 +232,15 @@ class AtftLog(object):
           log_file.write(message)
           log_file.flush()
 
+  def _GetLogFiles(self):
+    log_files = []
+    for file_name in os.listdir(self.log_dir):
+      if (os.path.isfile(os.path.join(self.log_dir, file_name)) and
+          file_name.startswith('atft_log_')):
+        log_files.append(file_name)
+    log_files.sort()
+    return log_files
+
   def _LimitSize(self, message):
     """This function limits the total size of logs.
 
@@ -218,16 +256,11 @@ class AtftLog(object):
       # If file size will exceed file_size_max, then create a new file and close
       # the current one.
       self._CreateLogFile()
-    log_files = []
-    for file_name in os.listdir(self.log_dir):
-      if (os.path.isfile(os.path.join(self.log_dir, file_name)) and
-          file_name.startswith('atft_log_')):
-        log_files.append(file_name)
 
+    log_files = self._GetLogFiles()
     if len(log_files) > self.log_file_number:
       # If file number exceeds LOG_FILE_NUMBER, then delete the oldest file.
       try:
-        log_files.sort()
         oldest_file = os.path.join(self.log_dir, log_files[0])
         os.remove(oldest_file)
       except IOError:
@@ -861,15 +894,21 @@ class Atft(wx.Frame):
 
     self.log = self.CreateAtftLog()
 
-    # Leave supervisor mode
-    self._OnToggleSupMode(None)
-
     if self.configs == None:
       self.ShowAlert(self.ALERT_FAIL_TO_PARSE_CONFIG)
       sys.exit(0)
 
     if not self.log.log_dir_file:
       self._SendAlertEvent(self.ALERT_FAIL_TO_CREATE_LOG)
+
+    if (not self.log.CheckInstanceRunning() and
+        not self._ShowWarning(self.ALERT_INSTANCE_RUNNING)):
+        sys.exit(0)
+
+    self.log.Info('Program', 'Program start')
+
+    # Leave supervisor mode
+    self._OnToggleSupMode(None)
 
     self.ShowStartScreen()
     self.StartRefreshingDevices()
@@ -1346,6 +1385,12 @@ class Atft(wx.Frame):
         'really sure what you are doing.',
         '设置项"PROVISION_STEPS"不符合必要的信息安全要求，请检查或者设定TEST_MODE为True'
         '如果你明确此行为带来的后果.'][index]
+    self.ALERT_INSTANCE_RUNNING = [
+        'Another instance of this tool is already running. If you continue, '
+        'the tool WILL NOT behave as expected, are you sure you want to '
+        'continue?',
+        '检测到已经有一个相同的程序在运行，如果继续运行可能会导致错误，确定要'
+        '继续吗？'][index]
 
     self.STATUS_MAPPED = ['Mapped', '已关联位置'][index]
     self.STATUS_NOT_MAPPED = ['Not mapped', '未关联位置'][index]
@@ -1433,6 +1478,11 @@ class Atft(wx.Frame):
         self, self.DIALOG_INPUT_PASSWORD, self.DIALOG_PASSWORD)
 
     self._CreateBindEvents()
+
+    self.main_box.Layout()
+    self.panel.SetSizerAndFit(self.main_box)
+    self.Layout()
+    self.SetSize(self.GetWindowSize())
 
   def _CreateAppMenu(self):
     """Create the app menu items."""

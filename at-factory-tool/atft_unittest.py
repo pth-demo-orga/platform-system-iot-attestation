@@ -23,6 +23,7 @@ import fastboot_exceptions
 from mock import call
 from mock import MagicMock
 from mock import patch
+from mock import mock_open
 import os
 import wx
 
@@ -1742,7 +1743,7 @@ class AtftTest(unittest.TestCase):
 
   # Test atft._GetRegFile
   @patch('__builtin__.open')
-  def testGetRegFile(self, mock_open):
+  def testGetRegFile(self, my_mock_open):
     mock_atft = MockAtft()
     mock_atft.atft_manager = MagicMock()
     mock_atft.atft_manager.atfa_dev = MagicMock()
@@ -1757,7 +1758,7 @@ class AtftTest(unittest.TestCase):
     mock_path.encode.return_value = mock_path
 
     mock_atft._GetRegFile(mock_path)
-    mock_open.assert_called_once_with(mock_path, 'w+')
+    my_mock_open.assert_called_once_with(mock_path, 'w+')
     mock_atft.atft_manager.atfa_dev.Upload.assert_called_once_with(mock_path)
     mock_atft.atft_manager.PrepareFile.assert_called_once_with('reg')
     mock_atft.PauseRefresh.assert_called_once()
@@ -1772,7 +1773,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendOperationSucceedEvent.reset_mock()
     mock_atft.PauseRefresh.reset_mock()
     mock_atft.ResumeRefresh.reset_mock()
-    mock_open.side_effect = IOError
+    my_mock_open.side_effect = IOError
     mock_atft._GetRegFile(mock_path)
     mock_atft.PauseRefresh.assert_called_once()
     mock_atft.ResumeRefresh.assert_called_once()
@@ -1792,7 +1793,7 @@ class AtftTest(unittest.TestCase):
 
   def TestGetRegFileFailureCommon(
       self, exception, upload_fail=False):
-    with patch('__builtin__.open') as mock_open:
+    with patch('__builtin__.open') as my_mock_open:
       mock_atft = MockAtft()
       mock_atft.atft_manager = MagicMock()
       mock_atft.atft_manager.atfa_dev = MagicMock()
@@ -1805,7 +1806,7 @@ class AtftTest(unittest.TestCase):
       mock_atft._SendAlertEvent = MagicMock()
       mock_path = MagicMock()
       mock_path.encode.return_value = mock_path
-      mock_open.side_effect = IOError
+      my_mock_open.side_effect = IOError
       if not upload_fail:
         mock_atft.atft_manager.PrepareFile.side_effect = exception
       else:
@@ -1821,7 +1822,7 @@ class AtftTest(unittest.TestCase):
 
   # Test atft._GetAuditFile
   @patch('__builtin__.open')
-  def testGetAuditFile(self, mock_open):
+  def testGetAuditFile(self, my_mock_open):
     mock_atft = MockAtft()
     mock_atft.atft_manager = MagicMock()
     mock_atft.atft_manager.atfa_dev = MagicMock()
@@ -1836,7 +1837,7 @@ class AtftTest(unittest.TestCase):
     mock_path.encode.return_value = mock_path
 
     mock_atft._GetAuditFile(mock_path)
-    mock_open.assert_called_once_with(mock_path, 'w+')
+    my_mock_open.assert_called_once_with(mock_path, 'w+')
     mock_atft.atft_manager.atfa_dev.Upload.assert_called_once_with(mock_path)
     mock_atft.atft_manager.PrepareFile.assert_called_once_with('audit')
     mock_atft.PauseRefresh.assert_called_once()
@@ -1851,7 +1852,7 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendOperationSucceedEvent.reset_mock()
     mock_atft.PauseRefresh.reset_mock()
     mock_atft.ResumeRefresh.reset_mock()
-    mock_open.side_effect = IOError
+    my_mock_open.side_effect = IOError
     mock_atft._GetAuditFile(mock_path)
     mock_atft.PauseRefresh.assert_called_once()
     mock_atft.ResumeRefresh.assert_called_once()
@@ -1871,7 +1872,7 @@ class AtftTest(unittest.TestCase):
 
   def TestGetAuditFileFailureCommon(
       self, exception, upload_fail=False):
-    with patch('__builtin__.open') as mock_open:
+    with patch('__builtin__.open') as my_mock_open:
       mock_atft = MockAtft()
       mock_atft.atft_manager = MagicMock()
       mock_atft.atft_manager.atfa_dev = MagicMock()
@@ -1884,7 +1885,7 @@ class AtftTest(unittest.TestCase):
       mock_atft._SendAlertEvent = MagicMock()
       mock_path = MagicMock()
       mock_path.encode.return_value = mock_path
-      mock_open.side_effect = IOError
+      my_mock_open.side_effect = IOError
       if not upload_fail:
         mock_atft.atft_manager.PrepareFile.side_effect = exception
       else:
@@ -1906,7 +1907,7 @@ class AtftTest(unittest.TestCase):
   @patch('os.mkdir')
   @patch('os.listdir')
   @patch('__builtin__.open')
-  def testAtftLogCreate(self, mock_open, mock_listdir, mock_makedir,
+  def testAtftLogCreate(self, my_mock_open, mock_listdir, mock_makedir,
                         mock_path_exists, mock_isfile, mock_createfile):
     log_dir = self.LOG_DIR
     log_size = 10
@@ -1930,7 +1931,7 @@ class AtftTest(unittest.TestCase):
   @patch('os.listdir')
   @patch('__builtin__.open')
   def testAtftLogCreateDirExists(
-      self, mock_open, mock_listdir, mock_makedir,
+      self, my_mock_open, mock_listdir, mock_makedir,
       mock_path_exists, mock_isfile, mock_createfile):
     log_dir = self.LOG_DIR
     log_size = 10
@@ -1952,7 +1953,7 @@ class AtftTest(unittest.TestCase):
   @patch('os.listdir')
   @patch('__builtin__.open')
   def testAtftLogCreateFirstLog(
-      self, mock_open, mock_listdir, mock_makedir,
+      self, my_mock_open, mock_listdir, mock_makedir,
       mock_path_exists, mock_isfile, mock_createfile):
     log_dir = self.LOG_DIR
     log_size = 10
@@ -1976,7 +1977,7 @@ class AtftTest(unittest.TestCase):
   @patch('os.path.exists')
   @patch('os.listdir')
   @patch('__builtin__.open')
-  def testAtftLogCreate(self, mock_open, mock_listdir, mock_path_exists):
+  def testAtftLogCreate(self, my_mock_open, mock_listdir, mock_path_exists):
     log_dir = self.LOG_DIR
     log_size = 10
     log_file_number = 1
@@ -1988,8 +1989,8 @@ class AtftTest(unittest.TestCase):
     atft_log._GetCurrentTimestamp = mock_get_time
     mock_get_time.return_value = self.TEST_TIMESTAMP
     atft_log._CreateLogFile()
-    mock_open.assert_called_once()
-    log_file = mock_open.call_args[0][0]
+    my_mock_open.assert_called_once()
+    log_file = my_mock_open.call_args[0][0]
     mock_get_time.assert_called_once()
     self.assertEqual(log_file, atft_log.log_dir_file)
     self.assertEqual(os.path.join(
@@ -2010,7 +2011,7 @@ class AtftTest(unittest.TestCase):
   @patch('os.remove')
   @patch('__builtin__.open')
   def testLimitSize(
-      self, mock_open, mock_remove, mock_listdir, mock_path_exists, mock_isfile,
+      self, my_mock_open, mock_remove, mock_listdir, mock_path_exists, mock_isfile,
       mock_getsize):
     log_dir = self.LOG_DIR
     log_size = 10
@@ -2335,7 +2336,6 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendAlertEvent.assert_not_called()
     self.assertNotEqual(
         mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.PROVISION_STEPS)
-
 
 
 if __name__ == '__main__':
