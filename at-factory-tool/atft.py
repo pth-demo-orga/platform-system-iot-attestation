@@ -3260,7 +3260,7 @@ class Atft(wx.Frame):
     for target in pending_targets:
       self._FuseVbootKeyTarget(target)
 
-  def _FuseVbootKeyTarget(self, target):
+  def _FuseVbootKeyTarget(self, target, auto_prov=False):
     """Fuse the verified boot key to a specific device.
 
     We would first fuse the bootloader vboot key
@@ -3269,6 +3269,7 @@ class Atft(wx.Frame):
 
     Args:
       target: The target device DeviceInfo object.
+      auto_prov: Whether this operation is done in automatic mode.
     """
     operation = 'Fuse bootloader verified boot key'
     serial = target.serial_number
@@ -3281,6 +3282,10 @@ class Atft(wx.Frame):
 
       operation = 'Verify bootloader locked, rebooting'
       self._SendOperationStartEvent(operation, target)
+
+      if auto_prov:
+        # Allow other devices to continue state transition.
+        self.auto_prov_lock.release()
 
       # If the device would reboot after fusing vboot key, need to wait for
       # device to disappear, then the reboot command would hold until the
@@ -3320,10 +3325,12 @@ class Atft(wx.Frame):
     finally:
       self._EndOperation(target)
 
-
     # Wait until callback finishes. After the callback, reboot_lock would be
     # released.
     reboot_lock.acquire()
+    if auto_prov:
+      # Try to get our turn again.
+      self.auto_prov_lock.acquire()
 
     target = self.atft_manager.GetTargetDevice(serial)
     if target and not target.provision_state.bootloader_locked:
@@ -3636,7 +3643,7 @@ class Atft(wx.Frame):
       i += 1
       if (not target.provision_state.bootloader_locked and
           operation == 'FuseVbootKey'):
-        self._FuseVbootKeyTarget(target)
+        self._FuseVbootKeyTarget(target, True)
         continue
       elif (not target.provision_state.avb_perm_attr_set and
             operation == 'FusePermAttr'):
