@@ -171,8 +171,8 @@ class AtftManTest(unittest.TestCase):
   def MockAddNewAtfa(self, serial, atft, mock_fastboot):
     mock_fastboot(self)
     atft._serial_mapper.refresh_serial_map()
-    atft.atfa_dev = atftman.DeviceInfo(
-        MagicMock(), serial, atft._serial_mapper.get_location(serial))
+    atft._atfa_dev_manager.SetATFADevice(atftman.DeviceInfo(
+        MagicMock(), serial, atft._serial_mapper.get_location(serial)))
 
   @patch('threading.Timer')
   @patch('__main__.AtftManTest.FastbootDeviceTemplate.ListDevices')
@@ -191,7 +191,8 @@ class AtftManTest(unittest.TestCase):
     atft_manager.ListDevices()
     # After adding a new target device, need to check its status.
     atft_manager.CheckProvisionStatus.assert_called_once()
-    self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
+    self.assertEqual(
+        atft_manager.GetATFADevice().serial_number, self.ATFA_TEST_SERIAL)
     self.assertEqual(1, len(atft_manager.target_devs))
     self.assertEqual(atft_manager.target_devs[0].serial_number,
                      self.TEST_SERIAL)
@@ -217,7 +218,8 @@ class AtftManTest(unittest.TestCase):
       atft_manager.ListDevices()
     # After adding a new target device, need to check its status.
     atft_manager.CheckProvisionStatus.assert_called_once()
-    self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
+    self.assertEqual(
+        atft_manager.GetATFADevice().serial_number, self.ATFA_TEST_SERIAL)
     self.assertEqual(0, len(atft_manager.target_devs))
 
   @patch('threading.Timer')
@@ -233,7 +235,8 @@ class AtftManTest(unittest.TestCase):
     mock_list_devices.return_value = [self.ATFA_TEST_SERIAL]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
+    self.assertEqual(
+        atft_manager.GetATFADevice().serial_number, self.ATFA_TEST_SERIAL)
     self.assertEqual(0, len(atft_manager.target_devs))
 
   @patch('threading.Timer')
@@ -245,7 +248,8 @@ class AtftManTest(unittest.TestCase):
     mock_list_devices.return_value = [self.TEST_SERIAL]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev, None)
+    self.assertEqual(
+        atft_manager.GetATFADevice(), None)
     self.assertEqual(1, len(atft_manager.target_devs))
     self.assertEqual(atft_manager.target_devs[0].serial_number,
                      self.TEST_SERIAL)
@@ -259,7 +263,7 @@ class AtftManTest(unittest.TestCase):
     mock_list_devices.return_value = [self.TEST_SERIAL, self.TEST_SERIAL2]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev, None)
+    self.assertEqual(atft_manager.GetATFADevice(), None)
     self.assertEqual(2, len(atft_manager.target_devs))
     self.assertEqual(atft_manager.target_devs[0].serial_number,
                      self.TEST_SERIAL)
@@ -283,7 +287,7 @@ class AtftManTest(unittest.TestCase):
     mock_fastboot.ListDevices.return_value = [self.TEST_SERIAL]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev, None)
+    self.assertEqual(atft_manager.GetATFADevice(), None)
     self.assertEqual(1, len(atft_manager.target_devs))
     self.assertEqual(atft_manager.target_devs[0].serial_number,
                      self.TEST_SERIAL)
@@ -308,7 +312,8 @@ class AtftManTest(unittest.TestCase):
     ]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
+    self.assertEqual(
+        atft_manager.GetATFADevice().serial_number, self.ATFA_TEST_SERIAL)
     self.assertEqual(1, len(atft_manager.target_devs))
     self.assertEqual(
         atft_manager.target_devs[0].serial_number, self.TEST_SERIAL)
@@ -332,7 +337,8 @@ class AtftManTest(unittest.TestCase):
     ]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev.serial_number, self.ATFA_TEST_SERIAL)
+    self.assertEqual(
+        atft_manager.GetATFADevice().serial_number, self.ATFA_TEST_SERIAL)
     self.assertEqual(1, len(atft_manager.target_devs))
     self.assertEqual(
         atft_manager.target_devs[0].serial_number, self.TEST_SERIAL)
@@ -358,7 +364,7 @@ class AtftManTest(unittest.TestCase):
     ]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev, None)
+    self.assertEqual(atft_manager.GetATFADevice(), None)
     self.assertEqual(2, len(atft_manager.target_devs))
     self.assertEqual(
         atft_manager.target_devs[0].serial_number, self.TEST_SERIAL)
@@ -390,7 +396,8 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(0, len(atft_manager.target_devs))
     # Second refresh, TEST_SERIAL2 should be added
     atft_manager.ListDevices()
-    self.assertEqual(self.ATFA_TEST_SERIAL, atft_manager.atfa_dev.serial_number)
+    self.assertEqual(
+        self.ATFA_TEST_SERIAL, atft_manager.GetATFADevice().serial_number)
     self.assertEqual(1, len(atft_manager.target_devs))
     self.assertEqual(atft_manager.target_devs[0].serial_number,
                      self.TEST_SERIAL2)
@@ -414,7 +421,7 @@ class AtftManTest(unittest.TestCase):
     atft_manager.ListDevices()
     mock_fastboot.ListDevices.return_value = [self.TEST_SERIAL]
     atft_manager.ListDevices()
-    self.assertEqual(None, atft_manager.atfa_dev)
+    self.assertEqual(None, atft_manager.GetATFADevice())
     self.assertEqual(2, mock_fastboot.call_count)
     self.assertEqual(atft_manager.target_devs[0].serial_number,
                      self.TEST_SERIAL)
@@ -520,7 +527,8 @@ class AtftManTest(unittest.TestCase):
     ]
     atft_manager.ListDevices()
     atft_manager.ListDevices()
-    self.assertEqual(atft_manager.atfa_dev.location, self.TEST_LOCATION)
+    self.assertEqual(
+        atft_manager.GetATFADevice().location, self.TEST_LOCATION)
     self.assertEqual(atft_manager.target_devs[0].location, self.TEST_LOCATION2)
 
   # Test _SortTargetDevices
@@ -734,12 +742,11 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) 100\nTEST'
-    test_atfa_device_manager.UpdateKeysLeft(False)
+    atft_manager.UpdateATFAKeysLeft(False)
     mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
     self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
 
@@ -747,12 +754,11 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.som_info = MagicMock()
     atft_manager.som_info.som_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) 100\nTEST'
-    test_atfa_device_manager.UpdateKeysLeft(True)
+    atft_manager.UpdateATFAKeysLeft(True)
     mock_atfa_dev.Oem.assert_called_once_with('num-som-keys ' + self.TEST_ID,
                                               True)
     self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
@@ -761,12 +767,11 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\r\n(bootloader) 100\r\nTEST'
-    test_atfa_device_manager.UpdateKeysLeft(False)
+    atft_manager.UpdateATFAKeysLeft(False)
     mock_atfa_dev.Oem.assert_called_once_with('num-keys ' + self.TEST_ID, True)
     self.assertEqual(100, atft_manager.GetCachedATFAKeysLeft())
 
@@ -774,71 +779,65 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.product_info = None
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
     mock_atfa_dev.Oem.return_value = 'TEST\r\n(bootloader) 100\r\nTEST'
     with self.assertRaises(ProductNotSpecifiedException):
-      test_atfa_device_manager.UpdateKeysLeft(False)
+      atft_manager.UpdateATFAKeysLeft(False)
 
   def testUpdateKeysLeftNoATFA(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
-    atft_manager.atfa_dev = None
+    atft_manager._atfa_dev_manager.SetATFADevice(None)
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
     with self.assertRaises(DeviceNotFoundException):
-      test_atfa_device_manager.UpdateKeysLeft(False)
+      atft_manager.UpdateATFAKeysLeft(False)
 
   def testUpdateKeysLeftInvalidFormat(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\nTEST'
     with self.assertRaises(FastbootFailure):
-      test_atfa_device_manager.UpdateKeysLeft(False)
+      atft_manager.UpdateATFAKeysLeft(False)
 
   def testUpdateKeysLeftInvalidNumber(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.return_value = 'TEST\n(bootloader) abcd\nTEST'
     with self.assertRaises(FastbootFailure):
-      test_atfa_device_manager.UpdateKeysLeft(False)
+      atft_manager.UpdateATFAKeysLeft(False)
 
   def testUpdateKeysLeftNoMatchingProduct(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
     mock_atfa_dev.Oem.side_effect = FastbootFailure(
         'No matching available products')
-    test_atfa_device_manager.UpdateKeysLeft(False)
+    atft_manager.UpdateATFAKeysLeft(False)
     self.assertEqual(0, mock_atfa_dev.keys_left)
 
   def testUpdateKeysLeftNoMatchingSoM(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.som_info = MagicMock()
     atft_manager.som_info.som_id = self.TEST_ID
     mock_atfa_dev.Oem.side_effect = FastbootFailure(
         'No matching available SoMs')
-    test_atfa_device_manager.UpdateKeysLeft(True)
+    atft_manager.UpdateATFAKeysLeft(True)
     self.assertEqual(0, mock_atfa_dev.keys_left)
 
   # Test AtfaDeviceManager.PurgeKey
@@ -846,46 +845,42 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.product_info = MagicMock()
     atft_manager.product_info.product_id = self.TEST_ID
-    test_atfa_device_manager.PurgeKey(False)
+    atft_manager.PurgeATFAKey(False)
     mock_atfa_dev.Oem.assert_called_once_with('purge ' + self.TEST_ID)
 
   def testPurgeKeySoM(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.som_info = MagicMock()
     atft_manager.som_info.som_id = self.TEST_ID
-    test_atfa_device_manager.PurgeKey(True)
+    atft_manager.PurgeATFAKey(True)
     mock_atfa_dev.Oem.assert_called_once_with('purge-som ' + self.TEST_ID)
 
   def testPurgeKeyProductNotSelected(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.product_info = None
     atft_manager.som_info = None
     with self.assertRaises(ProductNotSpecifiedException):
-      test_atfa_device_manager.PurgeKey(False)
+      atft_manager.PurgeATFAKey(False)
     mock_atfa_dev.Oem.assert_not_called()
 
   def testPurgeKeySoMNotSelected(self):
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa_dev = MagicMock()
-    atft_manager.atfa_dev = mock_atfa_dev
-    test_atfa_device_manager = atftman.AtfaDeviceManager(atft_manager)
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa_dev)
     atft_manager.product_info = None
     atft_manager.som_info = None
     with self.assertRaises(ProductNotSpecifiedException):
-      test_atfa_device_manager.PurgeKey(True)
+      atft_manager.PurgeATFAKey(True)
     mock_atfa_dev.Oem.assert_not_called()
 
   # Test AtftManager.CheckProvisionStatus
@@ -1189,8 +1184,8 @@ class AtftManTest(unittest.TestCase):
                                        self.mock_serial_mapper, self.configs)
     mock_atfa = MagicMock()
     mock_target = MagicMock()
-    atft_manager._atfa_dev_manager = MagicMock()
-    atft_manager.atfa_dev = mock_atfa
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa)
+    atft_manager._atfa_dev_manager.SetTime = MagicMock()
     atft_manager._GetAlgorithmList = MagicMock()
     atft_manager._GetAlgorithmList.return_value = [
         EncryptionAlgorithm.ALGORITHM_CURVE25519
@@ -1227,8 +1222,7 @@ class AtftManTest(unittest.TestCase):
                                        self.mock_serial_mapper, self.configs)
     mock_atfa = MagicMock()
     mock_target = MagicMock()
-    atft_manager._atfa_dev_manager = MagicMock()
-    atft_manager.atfa_dev = mock_atfa
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa)
     atft_manager._GetAlgorithmList = MagicMock()
     atft_manager._GetAlgorithmList.return_value = [
         EncryptionAlgorithm.ALGORITHM_CURVE25519
@@ -1254,8 +1248,8 @@ class AtftManTest(unittest.TestCase):
                                        self.mock_serial_mapper, self.configs)
     mock_atfa = MagicMock()
     mock_target = MagicMock()
-    atft_manager._atfa_dev_manager = MagicMock()
-    atft_manager.atfa_dev = mock_atfa
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa)
+    atft_manager._atfa_dev_manager.SetTime = MagicMock()
     atft_manager._GetAlgorithmList = MagicMock()
     atft_manager._GetAlgorithmList.return_value = [
         EncryptionAlgorithm.ALGORITHM_CURVE25519
@@ -1293,8 +1287,7 @@ class AtftManTest(unittest.TestCase):
                                        self.mock_serial_mapper, self.configs)
     mock_atfa = MagicMock()
     mock_target = MagicMock()
-    atft_manager._atfa_dev_manager = MagicMock()
-    atft_manager.atfa_dev = mock_atfa
+    atft_manager._atfa_dev_manager.SetATFADevice(mock_atfa)
     atft_manager._GetAlgorithmList = MagicMock()
     atft_manager._GetAlgorithmList.return_value = [
         EncryptionAlgorithm.ALGORITHM_CURVE25519
@@ -1897,7 +1890,8 @@ class AtftManTest(unittest.TestCase):
     mock_fastboot.assert_called_once_with(self.ATFA_TEST_SERIAL)
     mock_fastboot_controller.GetVar.assert_has_calls(
         [call('version'), call('os-version')])
-    self.assertEqual(self.ATFA_TEST_SERIAL, atft_manager.atfa_dev.serial_number)
+    self.assertEqual(
+        self.ATFA_TEST_SERIAL, atft_manager.GetATFADevice().serial_number)
 
   def testAddNewAtfaVersionNotCompatible(self):
     mock_fastboot = MagicMock()
@@ -1913,7 +1907,8 @@ class AtftManTest(unittest.TestCase):
     mock_fastboot.assert_called_once_with(self.ATFA_TEST_SERIAL)
     mock_fastboot_controller.GetVar.assert_has_calls(
         [call('version'), call('os-version')])
-    self.assertEqual(self.ATFA_TEST_SERIAL, atft_manager.atfa_dev.serial_number)
+    self.assertEqual(
+        self.ATFA_TEST_SERIAL, atft_manager.GetATFADevice().serial_number)
 
   def MockOsVersionException(self, name):
     if name == 'os-version':
@@ -1936,7 +1931,8 @@ class AtftManTest(unittest.TestCase):
         mock_fastboot, self.mock_serial_mapper, self.configs)
     with self.assertRaises(OsVersionNotAvailableException):
       atft_manager._AddNewAtfa(self.ATFA_TEST_SERIAL)
-    self.assertEqual(self.ATFA_TEST_SERIAL, atft_manager.atfa_dev.serial_number)
+    self.assertEqual(
+        self.ATFA_TEST_SERIAL, atft_manager.GetATFADevice().serial_number)
 
   # If the atfa device is not ready yet, the getvar('version') would throw
   # exception, we just ignore this device if it is not ready.
@@ -1948,7 +1944,8 @@ class AtftManTest(unittest.TestCase):
     atft_manager = atftman.AtftManager(
         mock_fastboot, self.mock_serial_mapper, self.configs)
     atft_manager._AddNewAtfa(self.ATFA_TEST_SERIAL)
-    self.assertEqual(None, atft_manager.atfa_dev)
+    self.assertEqual(
+        None, atft_manager.GetATFADevice())
 
 
 if __name__ == '__main__':
