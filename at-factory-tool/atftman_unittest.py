@@ -1083,21 +1083,31 @@ class AtftManTest(unittest.TestCase):
   @patch('tempfile.NamedTemporaryFile')
   def testCheckSomStatusNotProvisioned(
       self, mock_create_temp_file, mock_delete_file, mock_get_size):
+    self.status_map = {}
+    self.status_map['at-vboot-state'] = (
+        '(bootloader) bootloader-locked: 0\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 0\n'
+        '(bootloader) avb-locked: 0\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+    self.status_map['at-attest-uuid'] = ''
+    self.status_map['at-attest-dh'] = '1:p256;'
+    mock_device = MagicMock()
+    mock_device.GetVar.side_effect = self.MockGetVar
     mock_file = MagicMock()
     mock_create_temp_file.return_value = mock_file
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa = MagicMock()
-    mock_device = MagicMock()
     mock_device.provision_state = ProvisionState()
     mock_get_size.return_value = 133
-    # return value for 'at-attest-dh'
-    mock_device.GetVar.return_value = '1:p256;'
-    result = atft_manager.CheckSomKeyStatus(mock_device, False)
+
+    atft_manager.CheckProvisionStatus(mock_device)
+
     mock_create_temp_file.assert_called_once()
     mock_delete_file.assert_called_once_with(mock_file.name)
-    mock_device.GetVar.assert_called_once_with('at-attest-dh')
-    self.assertEqual(False, result)
+    mock_device.GetVar.assert_called()
     self.assertEqual(False, mock_device.provision_state.som_provisioned)
 
   @patch('os.path.getsize')
@@ -1105,20 +1115,31 @@ class AtftManTest(unittest.TestCase):
   @patch('tempfile.NamedTemporaryFile')
   def testCheckSomStatusProvisioned(
       self, mock_create_temp_file, mock_delete_file, mock_get_size):
+    self.status_map = {}
+    self.status_map['at-vboot-state'] = (
+        '(bootloader) bootloader-locked: 1\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 1\n'
+        '(bootloader) avb-locked: 0\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+    self.status_map['at-attest-uuid'] = ''
+    self.status_map['at-attest-dh'] = '1:p256;'
+    mock_device = MagicMock()
+    mock_device.GetVar.side_effect = self.MockGetVar
     mock_file = MagicMock()
     mock_create_temp_file.return_value = mock_file
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa = MagicMock()
-    mock_device = MagicMock()
     mock_device.provision_state = ProvisionState()
     mock_get_size.return_value = 134
-    mock_device.GetVar.return_value = '1:p256;'
-    result = atft_manager.CheckSomKeyStatus(mock_device, False)
+
+    atft_manager.CheckProvisionStatus(mock_device)
+
     mock_create_temp_file.assert_called_once()
     mock_delete_file.assert_called_once_with(mock_file.name)
-    mock_device.GetVar.assert_called_once_with('at-attest-dh')
-    self.assertEqual(True, result)
+    mock_device.GetVar.assert_called()
     self.assertEqual(True, mock_device.provision_state.som_provisioned)
     self.assertEqual(ProvisionStatus.SOM_PROVISION_SUCCESS,
                      mock_device.provision_status)
@@ -1128,21 +1149,32 @@ class AtftManTest(unittest.TestCase):
   @patch('tempfile.NamedTemporaryFile')
   def testCheckSomStatusProductProvisioned(
       self, mock_create_temp_file, mock_delete_file, mock_get_size):
+    self.status_map = {}
+    self.status_map['at-vboot-state'] = (
+        '(bootloader) bootloader-locked: 0\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 0\n'
+        '(bootloader) avb-locked: 0\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+    self.status_map['at-attest-uuid'] = self.TEST_UUID
+    self.status_map['at-attest-dh'] = '1:p256;'
+    mock_device = MagicMock()
+    mock_device.GetVar.side_effect = self.MockGetVar
     mock_file = MagicMock()
     mock_create_temp_file.return_value = mock_file
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa = MagicMock()
-    mock_device = MagicMock()
     mock_device.provision_state = ProvisionState()
     mock_device.provision_status = ProvisionStatus.PROVISION_SUCCESS
     mock_get_size.return_value = 134
-    mock_device.GetVar.return_value = '1:p256;'
-    result = atft_manager.CheckSomKeyStatus(mock_device, True)
+
+    atft_manager.CheckProvisionStatus(mock_device)
+
     mock_create_temp_file.assert_called_once()
     mock_delete_file.assert_called_once_with(mock_file.name)
-    mock_device.GetVar.assert_called_once_with('at-attest-dh')
-    self.assertEqual(True, result)
+    mock_device.GetVar.assert_called()
     self.assertEqual(True, mock_device.provision_state.som_provisioned)
     self.assertEqual(ProvisionStatus.PROVISION_SUCCESS,
                      mock_device.provision_status)
@@ -1152,20 +1184,32 @@ class AtftManTest(unittest.TestCase):
   @patch('tempfile.NamedTemporaryFile')
   def testCheckSomStatusFileNotExist(
       self, mock_create_temp_file, mock_delete_file, mock_get_size):
+    self.status_map = {}
+    self.status_map['at-vboot-state'] = (
+        '(bootloader) bootloader-locked: 0\n'
+        '(bootloader) bootloader-min-versions: -1,0,3\n'
+        '(bootloader) avb-perm-attr-set: 0\n'
+        '(bootloader) avb-locked: 0\n'
+        '(bootloader) avb-unlock-disabled: 0\n'
+        '(bootloader) avb-min-versions: 0:1,1:1,2:1,4097 :2,4098:2\n')
+    self.status_map['at-attest-uuid'] = self.TEST_UUID
+    self.status_map['at-attest-dh'] = ''
+    mock_device = MagicMock()
+    mock_device.GetVar.side_effect = self.MockGetVar
     mock_file = MagicMock()
     mock_create_temp_file.return_value = mock_file
     atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
                                        self.mock_serial_mapper, self.configs)
     mock_atfa = MagicMock()
-    mock_device = MagicMock()
     mock_device.provision_state = ProvisionState()
     mock_get_size.side_effect = os.error
-    result = atft_manager.CheckSomKeyStatus(mock_device, False)
+
+    atft_manager.CheckProvisionStatus(mock_device)
+
     mock_create_temp_file.assert_called_once()
     mock_delete_file.assert_called_once_with(mock_file.name)
-    self.assertEqual(False, result)
     self.assertEqual(False, mock_device.provision_state.som_provisioned)
-    self.assertNotEqual(ProvisionStatus.PROVISION_SUCCESS,
+    self.assertNotEqual(ProvisionStatus.SOM_PROVISION_SUCCESS,
                         mock_device.provision_status)
 
   # Test AtftManager.Provision

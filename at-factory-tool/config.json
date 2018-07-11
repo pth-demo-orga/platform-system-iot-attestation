@@ -1,6 +1,8 @@
 {
     "ATFA_REBOOT_TIMEOUT": "30.0",
     "ATFT_VERSION": "v2.0",
+    "AUDIT_DIR": "/tmp/atft_audit",
+    "AUDIT_INTERVAL": "10",
     "COMPATIBLE_ATFA_VERSION": "8",
     "DEVICE_REFRESH_INTERVAL": "1",
     "KEY_FILE_EXTENSION": "*.atfa",
