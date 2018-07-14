@@ -3935,6 +3935,9 @@ class Atft(wx.Frame):
           self._SendAlertEvent(self.atft_string.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
           self.OnLeaveAutoProv()
 
+    if target and self._is_provision_steps_finished(target.provision_state):
+      self._SendOperationSucceedEvent('All steps', target)
+
     self.auto_dev_serials.remove(serial)
     self.auto_prov_lock.release()
 
