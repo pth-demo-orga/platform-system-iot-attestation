@@ -12,7 +12,27 @@ issue commands between a product device and an Android Things Factory Appliance
 (ATFA). For detail please refer to [user
 guide](https://support.google.com/androidpartners_things/answer/9023873?hl=en&ref_topic=7394193).
 
-# Build and Run
+# How to Run
+
+If you already have a prebuilt version of the tool.
+
+## Windows
+
+1.  Download Microsoft Visual C++ Compiler for Python 2.7 from [this link]
+(https://www.microsoft.com/en-us/download/details.aspx?id=44266).
+
+1.  Install the Microsoft Visual C++ Compiler for Python 2.7 following the
+instruction on the link.
+
+1.  Execute the exe file 'atft.exe' under 'AThings-Factory-Tool' folder.
+
+## Linux
+
+1.  Execute the file 'atft' under 'AThings-Factory-Tool' folder. Run:
+
+    `cd AThings-Factory-Tool; ./atft`
+
+# How to Build and Run From Source Code
 
 ## Windows
 
@@ -35,6 +55,7 @@ guide](https://support.google.com/androidpartners_things/answer/9023873?hl=en&re
 
     *   repo/NOTICE
     *   repo/MODULE\_LICENSE\_APACHE2
+    *   repo/LICENSE
 
 1.  Goto the 'AThings-Factory-Tool/at-factory-tool' folder.
 
@@ -48,9 +69,13 @@ guide](https://support.google.com/androidpartners_things/answer/9023873?hl=en&re
     format correctly, use sublime or notepad++ or other advanced text editors
     instead)
 
-    Change the value for "LOG\_DIR" to a directory that you want to store the
-    log file. You need to change this because default value '/tmp/atft\_log'
-    would not exist and could not be created on Windows.
+    Change the value for "LOG\_DIR" to a directory to store the log file.
+    This default needs to be changed because '/tmp/atfa\_log' does not exist
+    on Windows.
+
+    Change the value for "AUDIT\_DIR" to a directory to store the audit file.
+    This default needs to be changed because '/tmp/atfa\_audit' does not exist
+    on Windows.
 
 1.  Open a command line, run
 
@@ -127,6 +152,7 @@ guide](https://support.google.com/androidpartners_things/answer/9023873?hl=en&re
 
     *   repo/NOTICE
     *   repo/MODULE\_LICENSE\_APACHE2
+    *   repo/LICENSE
 
 1.  Goto the 'AThings-Factory-Tool/at-factory-tool' folder.
 
@@ -185,38 +211,3 @@ guide](https://support.google.com/androidpartners_things/answer/9023873?hl=en&re
     'AThings-Factory-Tool' folder. Run:
 
     `cd AThings-Factory-Tool; ./atft`
-
-# License Information
-
-This package contains the following open source software:
-
-*   Android Things Factory Tool 2.0 -
-    https://android.googlesource.com/platform/system/iot/attestation/+/master/NOTICE
-
-*   Python 2.7.13 - https://www.python.org/download/releases/2.7/license/
-
-*   Python Packages:
-
-    *   wxPython 4.0.2 - https://www.wxpython.org/pages/license/
-    *   PyInstaller 3.2.1 - http://www.pyinstaller.org/license.html
-    *   sh 1.12.14 - https://github.com/amoffat/sh/blob/master/LICENSE.txt
-    *   six 1.11.0 - https://github.com/benjaminp/six/blob/master/LICENSE
-    *   future 0.16.0 - http://python-future.org/credits.html#licence
-    *   pypiwin32 219 -
-        https://github.com/mhammond/pywin32/blob/master/win32/License.txt
-    *   passlib 1.7.1 - https://pythonhosted.org/passlib/copyright.html
-
-This package contains the following Microsoft Visual C++ redistributable files:
-
-*   msvcr90.dll
-*   msvcp90.dll
-*   msvcm90.dll
-
-For more information on Microsoft Visual C++ redistributable files, see:
-
-*   https://msdn.microsoft.com/en-us/library/ms235299(v=vs.90).aspx
-*   https://msdn.microsoft.com/en-us/library/8kche8ah(v=vs.90).aspx
-
-The package uses tcl/tk8.5, see:
-
-*   https://www.tcl.tk/software/tcltk/license.html
