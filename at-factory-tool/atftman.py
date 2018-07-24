@@ -302,6 +302,10 @@ class RebootCallback(object):
     """The function to handle timeout callback.
 
     Call the timeout_callback that is registered.
+
+    Raises:
+      FastbootFailure: When fastboot command fails.
+      DeviceCreationException: When a device fails to be created.
     """
     if self.lock and self.lock.acquire(False):
       self.fail()
@@ -451,6 +455,12 @@ class AtftManager(object):
     Get the serial number of the ATFA device and the target device. If the
     device does not exist, the returned serial number would be None.
 
+    Raises:
+      FastbootFailure: When fastboot command fails.
+      DeviceCreationException: When a device fails to be created.
+      OsVersionNotAvailableException: When we cannot get the atfa version.
+      OsVersionNotCompatibleException: When the atfa version is not compatible.
+
     Args:
       sort_by: The field to sort by.
     """
@@ -465,6 +475,11 @@ class AtftManager(object):
 
     Args:
       device_serials: The device serial numbers.
+
+    Raises:
+      FastbootFailure: When fastboot command fails.
+      OsVersionNotAvailableException: When we cannot get the atfa version.
+      OsVersionNotCompatibleException: When the atfa version is not compatible.
     """
     self._UpdateSerials(device_serials)
     self._HandleSerials()
@@ -520,6 +535,11 @@ class AtftManager(object):
     """Create new devices and remove old devices.
 
     Add device location information and target device provision status.
+
+    Raises:
+      FastbootFailure: When fastboot command fails.
+      OsVersionNotAvailableException: When we cannot get the atfa version.
+      OsVersionNotCompatibleException: When the atfa version is not compatible.
     """
     device_serials = self.stable_serials
     new_targets = []
@@ -577,7 +597,7 @@ class AtftManager(object):
       return new_target_dev
     except FastbootFailure as e:
       self.stable_serials.remove(serial)
-      raise DeviceCreationException(e.msg, new_target_dev)
+      raise DeviceCreationException(e.msg, [new_target_dev])
 
   def _AddNewAtfa(self, atfa_serial):
     """Create a new ATFA device object.
@@ -614,17 +634,44 @@ class AtftManager(object):
         raise OsVersionNotAvailableException(atfa_dev)
 
   def _HandleRebootCallbacks(self):
-    """Handle the callback functions after the reboot."""
+    """Handle the callback functions after the reboot.
+
+    Raises:
+      FastbootFailure: When fastboot command fails.
+      DeviceCreationException: When a device fails to be created.
+    """
     success_serials = []
     for serial in self._reboot_callbacks:
       if serial in self.stable_serials:
         callback_lock = self._reboot_callbacks[serial].lock
         # Make sure the timeout callback would not be called at the same time.
-        if callback_lock and callback_lock.acquire(False):
+        if callback_lock:
           success_serials.append(serial)
 
+    fastboot_failure = None
+    device_creation_exception = None
+
     for serial in success_serials:
-      self._reboot_callbacks[serial].success()
+      if self._reboot_callbacks[serial].lock.acquire(False):
+        try:
+          self._reboot_callbacks[serial].success()
+        except FastbootFailure as e:
+          if not fastboot_failure:
+            fastboot_failure = e
+          else:
+            fastboot_failure.msg += '\n' + e.msg
+        except DeviceCreationException as e:
+          if not device_creation_exception:
+            device_creation_exception = e
+          else:
+            device_creation_exception.msg += '\n' + e.msg
+            device_creation_exception.devices.append(e.devices[0])
+
+    if fastboot_failure:
+      raise fastboot_failure
+
+    if device_creation_exception:
+      raise device_creation_exception
 
   def _ParseStateString(self, state_string):
     """Parse the string returned by 'at-vboot-state' to a key-value map.
@@ -1035,6 +1082,7 @@ class AtftManager(object):
       An extended callback function.
     Raises:
       FastbootFailure: When fastboot command fails.
+      DeviceCreationException: When a device fails to be created.
     """
     def RebootCallbackFunc(callback=callback, serial=serial, success=success):
       try:

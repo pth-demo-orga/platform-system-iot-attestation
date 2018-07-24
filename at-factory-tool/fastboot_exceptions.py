@@ -64,9 +64,9 @@ class ProductAttributesFileFormatError(AtftBaseException):
 
 class DeviceCreationException(AtftBaseException):
 
-  def __init__(self, msg, device):
+  def __init__(self, msg, devices):
     AtftBaseException.__init__(self)
-    self.device = device
+    self.devices = devices
     self.msg = 'Error while creating new device, fastboot error:' + msg
 
 
@@ -74,14 +74,14 @@ class OsVersionNotAvailableException(AtftBaseException):
 
   def __init__(self, device):
     AtftBaseException.__init__(self)
-    self.device = device
+    self.devices = [device]
 
 
 class OsVersionNotCompatibleException(AtftBaseException):
 
   def __init__(self, device, version):
     AtftBaseException.__init__(self)
-    self.device = device
+    self.devices = [device]
     self.version = version
 
 
