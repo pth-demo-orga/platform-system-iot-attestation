@@ -566,6 +566,7 @@ class AtftTest(unittest.TestCase):
 
   def testHandleStateTransition(self):
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
@@ -592,14 +593,16 @@ class AtftTest(unittest.TestCase):
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.PROVISION_SUCCESS,
                      test_dev1.provision_status)
+    mock_atft._SendOperationSucceedEvent.assert_called_once()
 
-  def testHandleStateTransitionSame(self):
+  def testHandleStateTransitionSameDevice(self):
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -621,9 +624,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.PROVISION_SUCCESS,
                      test_dev1.provision_status)
+    mock_atft._SendOperationSucceedEvent.assert_called_once()
 
   def testHandleStateTransitionFuseVbootFail(self):
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
@@ -650,9 +655,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.FUSEVBOOT_FAILED,
                      test_dev1.provision_status)
+    mock_atft._SendOperationSucceedEvent.assert_not_called()
 
   def testHandleStateTransitionRebootFail(self):
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
@@ -678,9 +685,11 @@ class AtftTest(unittest.TestCase):
     mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.REBOOT_FAILED, test_dev1.provision_status)
+    mock_atft._SendOperationSucceedEvent.assert_not_called()
 
   def testHandleStateTransitionFuseAttrFail(self):
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
@@ -707,9 +716,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.FUSEATTR_FAILED,
                      test_dev1.provision_status)
+    mock_atft._SendOperationSucceedEvent.assert_not_called()
 
   def testHandleStateTransitionLockAVBFail(self):
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
@@ -735,9 +746,11 @@ class AtftTest(unittest.TestCase):
     mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.LOCKAVB_FAILED, test_dev1.provision_status)
+    mock_atft._SendOperationSucceedEvent.assert_not_called()
 
   def testHandleStateTransitionProvisionFail(self):
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
@@ -764,9 +777,11 @@ class AtftTest(unittest.TestCase):
     mock_atft._HandleStateTransition(test_dev1)
     self.assertEqual(ProvisionStatus.PROVISION_FAILED,
                      test_dev1.provision_status)
+    mock_atft._SendOperationSucceedEvent.assert_not_called()
 
   def testHandleStateTransitionSkipStep(self):
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
@@ -804,6 +819,7 @@ class AtftTest(unittest.TestCase):
     self.assertEqual(True, test_dev1.provision_state.avb_perm_attr_set)
     self.assertEqual(True, test_dev1.provision_state.avb_locked)
     self.assertEqual(True, test_dev1.provision_state.product_provisioned)
+    mock_atft._SendOperationSucceedEvent.assert_called_once()
 
   def testHandleStateTransitionIncludeUnlock(self):
     """Test the provision_steps that unlock avb after provisioning.
@@ -905,6 +921,7 @@ class AtftTest(unittest.TestCase):
     We should make sure all the steps are executed even if they are reordered.
     """
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
@@ -944,11 +961,13 @@ class AtftTest(unittest.TestCase):
         ProvisionStatus.PROVISION_SUCCESS, test_dev1.provision_status)
     self.assertEqual(
         True, mock_atft._is_provision_steps_finished(test_dev1.provision_state))
+    mock_atft._SendOperationSucceedEvent.assert_called_once()
 
   def testHandleStateTransitionNoProvision(self):
     """Test the provision_steps that does not provision key.
     """
     mock_atft = MockAtft()
+    mock_atft._SendOperationSucceedEvent = MagicMock()
     test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
@@ -987,6 +1006,7 @@ class AtftTest(unittest.TestCase):
         ProvisionStatus.LOCKAVB_SUCCESS, test_dev1.provision_status)
     self.assertEqual(
         True, mock_atft._is_provision_steps_finished(test_dev1.provision_state))
+    mock_atft._SendOperationSucceedEvent.assert_called_once()
 
   # Test atft._UpdateKeysLeftInATFA
   def testUpdateATFAKeysLeft(self):
