@@ -564,7 +564,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -593,7 +593,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEVBOOT_FAILED:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEVBOOT_FAILED:
             self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -622,7 +622,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_FAILED:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_FAILED:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -650,7 +650,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -679,7 +679,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -707,7 +707,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -736,7 +736,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -781,7 +781,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -828,7 +828,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -874,7 +874,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_porov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
@@ -918,7 +918,7 @@ class AtftTest(unittest.TestCase):
                                ProvisionStatus.WAITING)
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.REBOOT_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
