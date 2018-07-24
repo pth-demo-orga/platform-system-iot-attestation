@@ -240,7 +240,7 @@ class DeviceInfo(object):
 
   def Copy(self):
     return DeviceInfo(None, self.serial_number, self.location,
-                      self.provision_status)
+                      self.provision_status, self.provision_state)
 
   def Reboot(self):
     return self._fastboot_device_controller.Reboot()
@@ -263,7 +263,8 @@ class DeviceInfo(object):
   def __eq__(self, other):
     return (self.serial_number == other.serial_number and
             self.location == other.location and
-            self.provision_status == other.provision_status)
+            self.provision_status == other.provision_status and
+            self.provision_state == other.provision_state)
 
   def __ne__(self, other):
     return not self.__eq__(other)
