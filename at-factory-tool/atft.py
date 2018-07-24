@@ -85,23 +85,30 @@ class AtftException(Exception):
   """The exception class to include device and operation information.
   """
 
-  def __init__(self, exception, operation=None, target=None):
+  def __init__(self, exception, operation=None, targets=None):
     """Init the exception class.
 
     Args:
       exception: The original exception object.
       operation: The operation that generates this exception.
-      target: The operating target device.
+      targets: The list of operating target devices.
     """
     Exception.__init__(self)
     self.exception = exception
     self.operation = operation
-    self.target = target
+    self.targets = targets
 
   def __str__(self):
     msg = ''
-    if self.target:
-      msg += '{' + str(self.target) + '} '
+    if self.targets:
+      if len(self.targets) == 1:
+        msg += '{' + str(self.targets[0]) + '}'
+      else:
+        msg += '['
+        for target in self.targets:
+          msg += '{' + str(target) + '}'
+        msg += ']'
+
     if self.operation:
       msg += self.operation + ' Failed! \n'
     msg += self._AddExceptionType(self.exception)
@@ -2903,7 +2910,7 @@ class Atft(wx.Frame):
       copy_list.append(dev.Copy())
     return copy_list
 
-  def _HandleException(self, level, e, operation=None, target=None):
+  def _HandleException(self, level, e, operation=None, targets=None):
     """Handle the exception.
 
     Fires a exception event which would be handled in main thread. The exception
@@ -2914,9 +2921,9 @@ class Atft(wx.Frame):
       level: The log level for the exception.
       e: The original exception.
       operation: The operation associated with this exception.
-      target: The DeviceInfo object associated with this exception.
+      targets: The list of DeviceInfo object associated with this exception.
     """
-    atft_exception = AtftException(e, operation, target)
+    atft_exception = AtftException(e, operation, targets)
     wx.QueueEvent(self,
                   Event(
                       self.exception_event,
@@ -3430,14 +3437,14 @@ class Atft(wx.Frame):
       try:
         self.atft_manager.ListDevices(self.sort_by)
       except DeviceCreationException as e:
-        self._HandleException('W', e, operation, e.device)
+        self._HandleException('W', e, operation, e.devices)
       except OsVersionNotAvailableException as e:
         e.msg = 'Failed to get ATFA version'
-        self._HandleException('W', e, operation, e.device)
+        self._HandleException('W', e, operation, e.devices)
         self._SendAlertEvent(self.atft_string.ALERT_INCOMPATIBLE_ATFA)
       except OsVersionNotCompatibleException as e:
         e.msg = 'Incompatible ATFA version, version is ' + str(e.version)
-        self._HandleException('W', e, operation, e.device)
+        self._HandleException('W', e, operation, e.devices)
         self._SendAlertEvent(self.atft_string.ALERT_INCOMPATIBLE_ATFA)
       except FastbootFailure as e:
         self._HandleException('W', e, operation)
