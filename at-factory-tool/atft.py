@@ -60,12 +60,14 @@ elif sys.platform.startswith('win'):
 
 # colors
 COLOR_WHITE = wx.Colour(255, 255, 255)
-COLOR_RED = wx.Colour(194, 40, 40)
+COLOR_RED = wx.Colour(192, 40, 40)
 COLOR_YELLOW = wx.Colour(218, 165, 32)
-COLOR_GREEN = wx.Colour(68, 209, 89)
-COLOR_BLUE = wx.Colour(43, 133, 216)
+COLOR_GREEN = wx.Colour(15, 133, 33)
+COLOR_BLUE = wx.Colour(36, 120, 198)
 COLOR_GREY = wx.Colour(237, 237, 237)
 COLOR_DARK_GREY = wx.Colour(117, 117, 117)
+COLOR_LIGHT_GREY = wx.Colour(247, 247, 247)
+COLOR_LIGHT_GREY_TEXT = wx.Colour(214, 214, 214)
 COLOR_BLACK = wx.Colour(0, 0, 0)
 COLOR_PICK_BLUE = wx.Colour(149, 169, 235)
 
@@ -154,8 +156,8 @@ class AtftString(object):
     self.MENU_PURGE = ['Purge Key Bundle', '清除密钥'][index]
 
     # Title
-    self.TITLE = ['Google Android Things Factory Tool',
-                  'Google Android Things 工厂程序'][index]
+    self.TITLE = ['Android Things Factory Tool',
+                  'Android Things 工厂程序'][index]
 
     # Area titles
     self.TITLE_ATFA_DEV = ['ATFA Device: ', 'ATFA 设备： '][index]
@@ -176,6 +178,7 @@ class AtftString(object):
     self.TITLE_SELECT_LANGUAGE = ['Select a language', '选择一种语言'][index]
     # Field names
     self.FIELD_SERIAL_NUMBER = ['SN', '序列号'][index]
+    self.SERIAL_NOT_MAPPED = ['Not Mapped', '未分配'][index]
     self.FIELD_USB_LOCATION = ['USB Location', '插入位置'][index]
     self.FIELD_STATUS = ['Status', '状态'][index]
 
@@ -1404,6 +1407,7 @@ class Atft(wx.Frame):
       # The number in the title bar.
       target_devs_output_number = wx.StaticText(
           target_devs_output_title, wx.ID_ANY, str(i + 1).zfill(2))
+      dev_component.index_text = target_devs_output_number
       target_devs_output_title_sizer.Add(
           target_devs_output_number, 0, wx.ALL, 10)
       number_font = wx.Font(
@@ -1447,7 +1451,7 @@ class Atft(wx.Frame):
       if map_usb:
         font_size = 20
       status_font = wx.Font(
-          font_size, wx.FONTFAMILY_MODERN, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+          font_size, wx.FONTFAMILY_SWISS, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
       target_devs_output_status_info.SetForegroundColour(COLOR_BLACK)
       target_devs_output_status_info.SetFont(status_font)
       dev_component.status = target_devs_output_status_info
@@ -1824,6 +1828,9 @@ class Atft(wx.Frame):
     self.Layout()
     self.SetSize(self.GetWindowSize())
 
+    # Display correct target device active/non-active status.
+    self._PrintTargetDevices()
+
   def _CreateAppMenu(self):
     """Create the app menu items."""
     app_menu = wx.Menu()
@@ -2004,7 +2011,7 @@ class Atft(wx.Frame):
     self.target_devs_title = wx.StaticText(
         target_devs_panel, wx.ID_ANY, self.atft_string.TITLE_TARGET_DEV)
     target_dev_font = wx.Font(
-        16, wx.FONTFAMILY_MODERN, wx.NORMAL, wx.FONTWEIGHT_BOLD)
+        16, wx.FONTFAMILY_SWISS, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
     self.target_devs_title.SetFont(target_dev_font)
     self.target_devs_title_sizer = wx.BoxSizer(wx.HORIZONTAL)
     self.target_devs_title_sizer.Add(self.target_devs_title, 0, wx.LEFT, 10)
@@ -2317,10 +2324,15 @@ class Atft(wx.Frame):
     self.panel.SetSizerAndFit(self.main_box)
     self.Layout()
     self.SetSize(self.GetWindowSize())
+    self.SetFocus()
 
   def OnLeaveSupMode(self):
     """Leave supervisor mode"""
     message = 'Leave supervisor mode'
+     # Clear all the selected target devices.
+    for index in range(0, TARGET_DEV_SIZE):
+      if self.target_dev_components[index].selected:
+        self._DeviceSelectHandler(None, index)
     self.PrintToCommandWindow(message)
     self.log.Info('Supmode', message)
     self.sup_mode = False
@@ -2919,7 +2931,11 @@ class Atft(wx.Frame):
       event: The triggering event.
       index: The index for the target device.
     """
+    if not self.sup_mode:
+      return
     dev_component = self.target_dev_components[index]
+    if not dev_component.active or not dev_component.serial_number:
+      return
     title_background = dev_component.title_background
     if not dev_component.selected:
       title_background.SetBackgroundColour(COLOR_PICK_BLUE)
@@ -2927,7 +2943,8 @@ class Atft(wx.Frame):
       title_background.SetBackgroundColour(COLOR_WHITE)
     title_background.Refresh()
     dev_component.selected = not dev_component.selected
-    event.Skip()
+    if event:
+      event.Skip()
 
   def MapUSBToSlotHandler(self, event, index):
     """The handler to map a target device's USB location to a UI slot.
@@ -3130,6 +3147,7 @@ class Atft(wx.Frame):
       state = None
       serial_number = None
       if self.device_usb_locations[i]:
+        self.target_dev_components[i].active = True
         for target_dev in self.atft_manager.target_devs:
           if target_dev.location == self.device_usb_locations[i]:
             serial_number = target_dev.serial_number
@@ -3138,6 +3156,8 @@ class Atft(wx.Frame):
                 ': ' + str(serial_number))
             status = target_dev.provision_status
             state = target_dev.provision_state
+      else:
+        self.target_dev_components[i].active = False
       self._ShowTargetDevice(i, serial_number, serial_text, status, state)
 
   def _GetTargetDevices(self):
@@ -3161,14 +3181,33 @@ class Atft(wx.Frame):
       state: The provision state.
     """
     dev_component = self.target_dev_components[i]
+    if not dev_component.active:
+      serial_text = self.atft_string.SERIAL_NOT_MAPPED
+      dev_component.serial_text.SetForegroundColour(COLOR_LIGHT_GREY_TEXT)
+      dev_component.index_text.SetForegroundColour(COLOR_LIGHT_GREY_TEXT)
+    else:
+      dev_component.serial_text.SetForegroundColour(COLOR_BLACK)
+      dev_component.index_text.SetForegroundColour(COLOR_DARK_GREY)
     dev_component.serial_text.SetLabel(serial_text)
+    dev_component.serial_text.Refresh()
+    dev_component.index_text.Refresh()
     dev_component.serial_number = serial_number
     color = self._GetStatusColor(status, state)
     if status != None:
       dev_component.status.SetLabel(
           ProvisionStatus.ToString(status, self.GetLanguageIndex()))
     else:
+      # This slot currently has no device
       dev_component.status.SetLabel('')
+      # If the device is selected, unselect it.
+      if dev_component.selected:
+        dev_component.title_background.SetBackgroundColour(COLOR_WHITE)
+        dev_component.title_background.Refresh()
+        dev_component.selected = False
+    if status == ProvisionStatus.IDLE:
+      dev_component.status.SetForegroundColour(COLOR_DARK_GREY)
+    else:
+      dev_component.status.SetForegroundColour(COLOR_WHITE)
     dev_component.status_wrapper.Layout()
     dev_component.status_background.SetBackgroundColour(color)
     dev_component.status_background.Refresh()
@@ -3183,7 +3222,7 @@ class Atft(wx.Frame):
       The color to be shown for the status.
     """
     if status == None:
-      return COLOR_GREY
+      return COLOR_LIGHT_GREY
     if status == ProvisionStatus.IDLE:
       return COLOR_GREY
     if self._is_provision_steps_finished(state):
@@ -3264,6 +3303,9 @@ class Atft(wx.Frame):
     """
     if self.app_settings_dialog:
       self.app_settings_dialog.UpdateMappingStatus()
+
+    # Update the UI on the target devices (grey out unmapped devices).
+    self._PrintTargetDevices()
 
   def _CreateThread(self, target, *args):
     """Create and start a thread.
