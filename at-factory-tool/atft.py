@@ -124,7 +124,7 @@ class AtftString(object):
 
   def __init__(self, index):
     # Top level menus
-    self.MENU_APPLICATION = ['Application', '应用'][index]
+    self.MENU_APPLICATION = ['&Application', '&A应用'][index]
     self.MENU_KEY_PROVISIONING = ['Key Provisioning', '密钥传输'][index]
     self.MENU_ATFA_DEVICE = ['ATFA Device', 'ATFA 管理'][index]
     self.MENU_AUDIT = ['Audit', '审计'][index]
@@ -1321,6 +1321,8 @@ class Atft(wx.Frame):
 
     self.InitializeUI()
 
+    self.CreateShortCuts()
+
     self.log = self.CreateAtftLog()
 
     self.audit = self.CreateAtftAudit()
@@ -1390,7 +1392,8 @@ class Atft(wx.Frame):
     for i in range(TARGET_DEV_SIZE):
       dev_component = DevComponent(i)
       # Create each target device panel.
-      target_devs_output_panel = wx.Window(parent, style=wx.BORDER_RAISED)
+      target_devs_output_panel = wx.Window(
+          parent, style=wx.BORDER_RAISED)
       target_devs_output_panel_sizer = wx.BoxSizer(wx.VERTICAL)
       dev_component.panel = target_devs_output_panel
 
@@ -1831,6 +1834,69 @@ class Atft(wx.Frame):
     # Display correct target device active/non-active status.
     self._PrintTargetDevices()
 
+  def CreateShortCuts(self):
+    """Create hot key bindings. """
+    accel_entries = []
+    event_id = wx.NewId()
+    accel_entries.append(
+        wx.AcceleratorEntry(wx.ACCEL_ALT, ord('S'), event_id))
+    self.Bind(wx.EVT_MENU, self._OnToggleSupMode, id=event_id)
+    event_id = wx.NewId()
+    accel_entries.append(
+        wx.AcceleratorEntry(wx.ACCEL_ALT, ord('T'), event_id))
+    self.Bind(wx.EVT_MENU, self._OnFocusTargetDevList, id=event_id)
+    event_id = wx.NewId()
+    accel_entries.append(
+        wx.AcceleratorEntry(wx.ACCEL_NORMAL, wx.WXK_TAB, event_id))
+    self.Bind(wx.EVT_MENU, self._OnPressTab, id=event_id)
+    event_id = wx.NewId()
+    accel_entries.append(
+        wx.AcceleratorEntry(wx.ACCEL_NORMAL, wx.WXK_RETURN, event_id))
+    self.Bind(wx.EVT_MENU, self._OnPressEnter, id=event_id)
+    self.SetAcceleratorTable(wx.AcceleratorTable(accel_entries))
+
+  def _OnFocusTargetDevList(self, event):
+    """Focus on the first target device slot.
+
+    Args:
+      event: The triggering event.
+    """
+    if not self.sup_mode:
+      return
+    self.target_dev_components[0].panel.SetFocus()
+
+  def _OnPressTab(self, event):
+    """Handler when 'tab' is pressed. Change focus on target device slot.
+
+    Args:
+      event: The triggering event.
+    """
+    if not self.sup_mode:
+      return
+
+    window = wx.Window.FindFocus()
+
+    # If the current focus is on target d
+    for i in range(0, TARGET_DEV_SIZE):
+      if window == self.target_dev_components[i].panel:
+        j = (i + 1) % TARGET_DEV_SIZE
+        self.target_dev_components[j].panel.SetFocus()
+        return
+
+  def _OnPressEnter(self, event):
+    """Handler when 'enter' is pressed.
+
+    If the current focus is on a target device slot, click that slot.
+
+    Args:
+      event: The triggering event.
+    """
+    window = wx.Window.FindFocus()
+    for i in range(0, TARGET_DEV_SIZE):
+      if window == self.target_dev_components[i].panel:
+        window.QueueEvent(wx.MouseEvent(wx.wxEVT_LEFT_DOWN));
+        return
+
   def _CreateAppMenu(self):
     """Create the app menu items."""
     app_menu = wx.Menu()
@@ -1839,6 +1905,7 @@ class Atft(wx.Frame):
     menu_app_settings = app_menu.Append(
         wx.ID_ANY, self.atft_string.MENU_APP_SETTINGS)
     self.Bind(wx.EVT_MENU, self.ChangeSettings, menu_app_settings)
+    self.menu_app_settings = menu_app_settings
 
     menu_choose_product = app_menu.Append(
         wx.ID_ANY, self.atft_string.MENU_CHOOSE_PRODUCT)
@@ -2128,6 +2195,7 @@ class Atft(wx.Frame):
     self.start_screen.Layout()
     self.SetSize(self.start_screen.GetSize())
     self.CenterOnParent()
+    button_choose_product.SetFocus()
 
   def HideStartScreen(self):
     """Hide the start screen."""
@@ -2141,6 +2209,7 @@ class Atft(wx.Frame):
     self.panel.SetSizerAndFit(self.main_box)
     self.Layout()
     self.SetSize(self.GetWindowSize())
+    self.SetFocus()
 
   def GetWindowSize(self):
     """Get the current main window size."""
@@ -2920,6 +2989,12 @@ class Atft(wx.Frame):
       Atft._BindEventRecursive(
           wx.EVT_LEFT_DOWN, dev_component.panel,
           lambda event, index=i : self._DeviceSelectHandler(event, index))
+      dev_component.panel.Bind(
+          wx.EVT_SET_FOCUS,
+          lambda event, index=i : self._DeviceFocusHandler(event, index))
+      dev_component.panel.Bind(
+          wx.EVT_KILL_FOCUS,
+          lambda event, index=i : self._DeviceLostFocusHandler(event, index))
       i += 1
 
     # Bind the close event
@@ -2943,8 +3018,31 @@ class Atft(wx.Frame):
       title_background.SetBackgroundColour(COLOR_WHITE)
     title_background.Refresh()
     dev_component.selected = not dev_component.selected
+    dev_component.panel.SetFocus()
     if event:
       event.Skip()
+
+  def _DeviceFocusHandler(self, event, index):
+    """The handler when a target device slot is focused.
+
+    Args:
+      event: The triggering event.
+      index: The index for the target device.
+    """
+    dev_component = self.target_dev_components[index]
+    dev_component.panel.SetWindowStyleFlag(wx.BORDER_SUNKEN)
+    dev_component.panel.GetParent().Refresh()
+
+  def _DeviceLostFocusHandler(self, event, index):
+    """The handler when a target device slot loses focus.
+
+    Args:
+      event: The triggering event.
+      index: The index for the target device.
+    """
+    dev_component = self.target_dev_components[index]
+    dev_component.panel.SetWindowStyleFlag(wx.BORDER_RAISED)
+    dev_component.panel.GetParent().Refresh()
 
   def MapUSBToSlotHandler(self, event, index):
     """The handler to map a target device's USB location to a UI slot.
