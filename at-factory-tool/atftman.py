@@ -652,10 +652,15 @@ class AtftManager(object):
     Raises:
       FastbootFailure: When fastboot command fails.
     """
-    state_string = target_dev.GetVar('at-vboot-state')
+    new_provision_status = ProvisionStatus.IDLE
+    new_provision_state = ProvisionState()
 
-    target_dev.provision_status = ProvisionStatus.IDLE
-    target_dev.provision_state = ProvisionState()
+    try:
+      state_string = target_dev.GetVar('at-vboot-state')
+    except FastbootFailure as e:
+      target_dev.provision_status = new_provision_status
+      target_dev.provision_state = new_provision_state
+      raise e
 
     status_set = False
 
@@ -665,9 +670,9 @@ class AtftManager(object):
       # NOT_PROVISIONED is for test purpose.
       if at_attest_uuid and at_attest_uuid != 'NOT_PROVISIONED':
         target_dev.at_attest_uuid = at_attest_uuid
-        target_dev.provision_status = ProvisionStatus.PROVISION_SUCCESS
+        new_provision_status = ProvisionStatus.PROVISION_SUCCESS
         status_set = True
-        target_dev.provision_state.product_provisioned = True
+        new_provision_state.product_provisioned = True
     except FastbootFailure:
       # Some board might gives error if at-attest-uuid is not set.
       pass
@@ -684,32 +689,41 @@ class AtftManager(object):
     state_map = self._ParseStateString(state_string)
     if state_map.get('avb-locked') and state_map['avb-locked'] == '1':
       if not status_set:
-        target_dev.provision_status = ProvisionStatus.LOCKAVB_SUCCESS
+        new_provision_status = ProvisionStatus.LOCKAVB_SUCCESS
         status_set = True
-      target_dev.provision_state.avb_locked = True
+      new_provision_state.avb_locked = True
 
-    status_set = self.CheckSomKeyStatus(target_dev, status_set)
+    contain_som_key = self.CheckSomKeyStatus(target_dev)
+
+    if contain_som_key:
+      new_provision_state.som_provisioned = True
+      if not status_set:
+        new_provision_status = ProvisionStatus.SOM_PROVISION_SUCCESS
+        status_set = True
 
     if (state_map.get('avb-perm-attr-set') and
         state_map['avb-perm-attr-set'] == '1'):
       if not status_set:
-        target_dev.provision_status = ProvisionStatus.FUSEATTR_SUCCESS
+        new_provision_status = ProvisionStatus.FUSEATTR_SUCCESS
         status_set = True
-      target_dev.provision_state.avb_perm_attr_set = True
+      new_provision_state.avb_perm_attr_set = True
 
     if (state_map.get('bootloader-locked') and
         state_map['bootloader-locked'] == '1'):
       if not status_set:
-        target_dev.provision_status = ProvisionStatus.FUSEVBOOT_SUCCESS
-      target_dev.provision_state.bootloader_locked = True
+        new_provision_status = ProvisionStatus.FUSEVBOOT_SUCCESS
+      new_provision_state.bootloader_locked = True
 
-  def CheckSomKeyStatus(self, target_dev, status_set):
+    target_dev.provision_status = new_provision_status
+    target_dev.provision_state = new_provision_state
+
+  def CheckSomKeyStatus(self, target_dev):
     """Checks whether the target device has som key.
 
     Args:
       target_dev: The target device (DeviceInfo).
-      status_set: Whether a successful status has already been set.
-    Return: Whether contains som key.
+    Return:
+      Whether contains som key.
     """
 
     tmp_file = tempfile.NamedTemporaryFile(delete=False)
@@ -731,13 +745,13 @@ class AtftManager(object):
       # If some command fail while trying to check som key status, we assume
       # som key is not there
       os.unlink(ca_request_file)
-      return status_set
+      return False
 
     try:
       file_size = os.path.getsize(ca_request_file)
     except os.error:
       os.unlink(ca_request_file)
-      return status_set
+      return False
     os.unlink(ca_request_file)
     # cleartext header                            8
     # cleartext device ephemeral public key       33
@@ -758,12 +772,9 @@ class AtftManager(object):
     # TODO: We only check response size here. Need to add more robust check.
     # If size is larger than minimum size, something is in the key cert field.
     if file_size > min_message_length:
-      target_dev.provision_state.som_provisioned = True
-      if not status_set:
-        target_dev.provision_status = ProvisionStatus.SOM_PROVISION_SUCCESS
       return True
     else:
-      return status_set
+      return False
 
   def TransferContent(self, src, dst):
     """Transfer content from a device to another device.

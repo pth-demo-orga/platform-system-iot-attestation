@@ -21,7 +21,7 @@ locates Fastboot devices and can initiate communication between the ATFA and
 an Android Things device.
 """
 import copy
-from datetime import datetime
+import datetime
 import json
 import math
 import os
@@ -71,6 +71,9 @@ COLOR_PICK_BLUE = wx.Colour(149, 169, 235)
 
 # How many target devices allowed.
 TARGET_DEV_SIZE = 6
+
+# How many audit files are kept for each ATFA in the atft_audit folder
+MAX_AUDIT_FILE_NUMBER = 1
 
 LANGUAGE_OPTIONS = ['English', '简体中文']
 LANGUAGE_CONFIGS = ['eng', 'cn']
@@ -171,7 +174,6 @@ class AtftString(object):
     self.TITLE_FIRST_WARNING = ['1st\twarning: ', '警告一：'][index]
     self.TITLE_SECOND_WARNING = ['2nd\twarning: ', '警告二：'][index]
     self.TITLE_SELECT_LANGUAGE = ['Select a language', '选择一种语言'][index]
-
     # Field names
     self.FIELD_SERIAL_NUMBER = ['SN', '序列号'][index]
     self.FIELD_USB_LOCATION = ['USB Location', '插入位置'][index]
@@ -395,6 +397,103 @@ class AtftString(object):
     self.STATUS_MAPPING = ['Mapping', '正在关联'][index]
 
 
+class AtftAudit(object):
+  """The class to manage audit files in ATFA. """
+
+  @staticmethod
+  def GetAuditFileName(serial):
+    time = datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')
+    return '{}_{}.audit'.format(serial, time)
+
+  def __init__(self,
+               audit_dir,
+               download_interval,
+               get_file_handler,
+               get_atfa_serial):
+    """Initialize ATFT Audit object.
+
+    Args:
+      audit_dir: The audit file directory.
+      download_interval: How often (keys) to pull audit file.
+      get_file_handler: The function to get file from ATFA.
+      get_atfa_serial: The function to get current ATFA serial.
+    """
+    self.audit_dir = audit_dir
+    self.last_audit_keys_left = -1
+    self.download_interval = download_interval
+    self.get_file_handler = get_file_handler
+    self.get_atfa_serial = get_atfa_serial
+    if not os.path.exists(self.audit_dir):
+      # If audit directory does not exist, try to create it.
+      try:
+        os.mkdir(self.audit_dir)
+      except IOError:
+        return
+
+  def PullAudit(self, keys_left):
+    """Pull audit file from ATFA if the download_interval keys has been used.
+
+    Args:
+      keys_left: Currently how many keys left in the ATFA.
+    """
+    if (self.last_audit_keys_left == -1 or (
+        self.last_audit_keys_left - self.download_interval >= keys_left)):
+      if self._DownloadAudit():
+        self.last_audit_keys_left = keys_left
+
+  def _GetAuditFiles(self, serial_number):
+    """Get a list of all the audit files in the audit directory.
+
+    Args:
+      serial_number: The serial number for the current ATFA.
+    Returns:
+      A list of audit file names.
+    """
+    audit_files = []
+    for file_name in os.listdir(self.audit_dir):
+      if (os.path.isfile(os.path.join(self.audit_dir, file_name)) and
+          file_name.endswith('.audit') and
+          file_name.startswith(serial_number)):
+        audit_files.append(file_name)
+    audit_files.sort()
+    return audit_files
+
+  def ResetKeysLeft(self):
+    """Force to pull ATFA audit file. """
+    self.last_audit_keys_left = -1
+
+  def _DownloadAudit(self):
+    """Download audit file from ATFA and remove old audit files.
+
+    Returns:
+      Whether the audit file is downloaded successfully.
+    """
+    try:
+      serial = self.get_atfa_serial()
+    except DeviceNotFoundException as e:
+      return False
+    except FastbootFailure as e:
+      self._HandleException('E', e)
+      return False
+
+    filepath = os.path.join(
+        self.audit_dir, AtftAudit.GetAuditFileName(serial))
+
+    if not self.get_file_handler(filepath, 'audit', False):
+      return False
+
+    # We only remove old files if we successfully pull audit file.
+    while True:
+      audit_files = self._GetAuditFiles(serial)
+      # We keep at most MAX_AUDIT_FILE_NUMBER records in case one is broken.
+      if len(audit_files) <= MAX_AUDIT_FILE_NUMBER:
+        break
+      oldest_file = os.path.join(self.audit_dir, audit_files[0])
+      os.remove(oldest_file)
+
+    return True
+
+
 class AtftLog(object):
   """The class to handle logging.
 
@@ -520,7 +619,7 @@ class AtftLog(object):
       tag: The log tag.
       string: The log message.
     """
-    time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     message = '[{0}] {1}/{2}: {3}'.format(
         time, code, tag, string.replace('\n', '\t'))
     if self.log_dir_file:
@@ -585,7 +684,8 @@ class AtftLog(object):
       self.log_dir_file = None
 
   def _GetCurrentTimestamp(self):
-    return int((datetime.now() - datetime(1970, 1, 1)).total_seconds())
+    return int((datetime.datetime.now() -
+                datetime.datetime(1970, 1, 1)).total_seconds())
 
   def __del__(self):
     """Cleanup function. This would log the 'Program Exit' message.
@@ -1220,6 +1320,8 @@ class Atft(wx.Frame):
 
     self.log = self.CreateAtftLog()
 
+    self.audit = self.CreateAtftAudit()
+
     if self.configs == None:
       self.ShowAlert(self.atft_string.ALERT_FAIL_TO_PARSE_CONFIG)
       sys.exit(0)
@@ -1415,6 +1517,16 @@ class Atft(wx.Frame):
     """
     return AtftLog(self.log_dir, self.log_size, self.log_file_number)
 
+  def CreateAtftAudit(self):
+    """Create an AtftAudit object.
+
+    This function exists for test mocking.
+    """
+    return AtftAudit(self.audit_dir,
+                     self.audit_interval,
+                     self._GetFileFromATFA,
+                     self.atft_manager.GetATFASerial)
+
   def ParseConfigFile(self):
     """Parse the configuration file and read in the necessary configurations.
 
@@ -1430,6 +1542,9 @@ class Atft(wx.Frame):
     self.log_dir = None
     self.log_size = 0
     self.log_file_number = 0
+    self.audit_dir = None
+    # By default we download audit file per 10 keys provisioned.
+    self.audit_interval = 10
     self.language = 'eng'
     self.reboot_timeout = 0
     self.atfa_reboot_timeout = 0
@@ -1464,6 +1579,7 @@ class Atft(wx.Frame):
       self.log_dir = str(configs['LOG_DIR'])
       self.log_size = int(configs['LOG_SIZE'])
       self.log_file_number = int(configs['LOG_FILE_NUMBER'])
+      self.audit_dir = str(configs['AUDIT_DIR'])
       self.language = str(configs['LANGUAGE'])
       self.reboot_timeout = float(configs['REBOOT_TIMEOUT'])
       self.atfa_reboot_timeout = float(configs['ATFA_REBOOT_TIMEOUT'])
@@ -1478,6 +1594,8 @@ class Atft(wx.Frame):
         self.test_mode = configs['TEST_MODE']
       if 'PROVISION_STEPS' in configs:
         self.provision_steps = configs['PROVISION_STEPS']
+      if 'AUDIT_INTERVAL' in configs:
+        self.audit_interval = int(configs['AUDIT_INTERVAL'])
     except (KeyError, ValueError):
       return None
 
@@ -2066,7 +2184,7 @@ class Atft(wx.Frame):
     Args:
       text: The text to be printed.
     """
-    msg = '[' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '] '
+    msg = '[' + datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '] '
     msg += text + '\n'
     self.PrintToWindow(self.cmd_output, msg, True)
 
@@ -2145,7 +2263,7 @@ class Atft(wx.Frame):
     if self.auto_prov:
       return
     if (self.atft_manager.GetATFADevice() and
-        self.atft_manager.GetCachedATFAKeysLeft() > 0 and
+        self._GetCachedATFAKeysLeft() > 0 and
         (self.atft_manager.product_info or self.atft_manager.som_info)):
       # If product info file is chosen and atfa device is present and there are
       # keys left. Enter auto provisioning mode.
@@ -2426,6 +2544,7 @@ class Atft(wx.Frame):
         # User choose a new product, reset how many keys left.
         if (self.atft_manager.GetATFADevice() and (
               self.atft_manager.product_info or self.atft_manager.som_info)):
+          self.audit.ResetKeysLeft()
           self._UpdateKeysLeftInATFA()
 
         # If user change from one mode to another mode, change the default
@@ -2490,15 +2609,15 @@ class Atft(wx.Frame):
       event: The triggering event.
     """
     message = self.atft_string.DIALOG_SELECT_DIRECTORY
-    time = datetime.utcnow().strftime('%Y%m%d%H%M%S')
     try:
-      filename = self.atft_manager.GetATFASerial() + '_' + time +'.audit'
+      serial = self.atft_manager.GetATFASerial()
     except DeviceNotFoundException as e:
       self._SendAlertEvent(self.atft_string.ALERT_NO_ATFA)
       return
     except FastbootFailure as e:
       self._HandleException('E', e)
       return
+    filename = AtftAudit.GetAuditFileName(serial)
     callback = self._GetAuditFile
     data = self.SaveFileArg(message, filename, callback)
     event = Event(self.save_file_event, value=data)
@@ -2639,11 +2758,12 @@ class Atft(wx.Frame):
           not self.atft_manager.product_info and
           not self.atft_manager.som_info)):
         raise DeviceNotFoundException
-      keys_left = self.atft_manager.GetCachedATFAKeysLeft()
+      keys_left = self._GetCachedATFAKeysLeft()
       if not keys_left and keys_left != 0:
-        # If keys_left is not set, try to set it.
+        # If keys_left is not set, try to set it and pull the audit.
+        self.audit.ResetKeysLeft()
         self._UpdateKeysLeftInATFA()
-        keys_left = self.atft_manager.GetCachedATFAKeysLeft()
+        keys_left = self._GetCachedATFAKeysLeft()
       text = self.atft_string.TITLE_KEYS_LEFT + str(keys_left)
       if not keys_left or keys_left < 0:
         raise NoKeysException
@@ -3027,6 +3147,7 @@ class Atft(wx.Frame):
         if (self.device_usb_locations[i] and
             target_dev.location == self.device_usb_locations[i]):
           target_devs.append(target_dev)
+          break
     return target_devs
 
   def _ShowTargetDevice(self, i, serial_number, serial_text, status, state):
@@ -3216,6 +3337,8 @@ class Atft(wx.Frame):
       self.ResumeRefresh()
 
     self._SendOperationSucceedEvent(operation)
+    # Try to pull audit from ATFA if keys_left changes.
+    self.audit.PullAudit(self._GetCachedATFAKeysLeft())
     return True
 
   def _GetCachedATFAKeysLeft(self):
@@ -3236,8 +3359,7 @@ class Atft(wx.Frame):
       return
     if self._UpdateKeysLeftInATFA():
       self._SendAlertEvent(
-          self.atft_string.ALERT_KEYS_LEFT(
-              self.atft_manager.GetCachedATFAKeysLeft()))
+          self.atft_string.ALERT_KEYS_LEFT(self._GetCachedATFAKeysLeft()))
 
   def _FuseVbootKey(self, selected_serials):
     """Fuse the verified boot key to the devices.
@@ -3694,9 +3816,6 @@ class Atft(wx.Frame):
       self.atft_manager.ProcessATFAKey()
       self._SendOperationSucceedEvent(operation)
 
-      # Check ATFA status after new key stored.
-      if self.atft_manager.product_info or self.atft_manager.som_info:
-        self._UpdateKeysLeftInATFA()
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException('W', e, operation)
@@ -3708,6 +3827,12 @@ class Atft(wx.Frame):
       return
     finally:
       self._EndOperation(atfa_dev)
+
+    # Check ATFA status after new key stored.
+    if self.atft_manager.product_info or self.atft_manager.som_info:
+      # Force download audit file if you switch to a new product.
+      self.audit.ResetKeysLeft()
+      self._UpdateKeysLeftInATFA()
 
   def _UpdateATFACallback(self, pathname):
     self._CreateThread(self._UpdateATFA, pathname)
@@ -3767,19 +3892,21 @@ class Atft(wx.Frame):
       self._EndOperation(atfa_dev)
 
   def _GetRegFile(self, filepath):
-    self._CreateThread(self._GetFileFromATFA, filepath, 'reg')
+    self._CreateThread(self._GetFileFromATFA, filepath, 'reg', True)
 
-  def _GetAuditFile(self, filepath):
-    self._CreateThread(self._GetFileFromATFA, filepath, 'audit')
+  def _GetAuditFile(self, filepath, show_alert=True):
+    self._CreateThread(self._GetFileFromATFA, filepath, 'audit', show_alert)
 
-  def _GetFileFromATFA(self, filepath, file_type):
+  def _GetFileFromATFA(self, filepath, file_type, show_alert):
     """Download a type of file from the ATFA device.
 
     Args:
+      filepath: The path to the downloaded file.
       file_type: The type of the file to be downloaded. Supported options are
         'reg'/'audit'.
-    Args:
-      pathname: The path to the downloaded file.
+      show_alert: Whether to display an alert if error happens.
+    Returns:
+      Whether this operation succeed.
     """
     atfa_dev = self.atft_manager.GetATFADevice()
     if file_type == 'audit':
@@ -3790,10 +3917,10 @@ class Atft(wx.Frame):
       alert_cannot_get_file_message = self.atft_string.ALERT_CANNOT_GET_REG
     else:
       # Should not reach here.
-      return
+      return False
     operation = 'ATFA device prepare and download ' + file_type + ' file'
-    if not self._StartOperation(operation,atfa_dev):
-      return
+    if not self._StartOperation(operation, atfa_dev):
+      return False
     try:
       filepath = filepath.encode('utf-8')
       write_file = open(filepath, 'w+')
@@ -3803,22 +3930,27 @@ class Atft(wx.Frame):
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
       self._HandleException('W', e, operation)
-      self._SendAlertEvent(self.atft_string.ALERT_NO_ATFA)
-      return
+      if show_alert:
+        self._SendAlertEvent(self.atft_string.ALERT_NO_ATFA)
+      return False
     except IOError as e:
       self._HandleException('E', e)
-      self._SendAlertEvent(self.atft_string.ALERT_CANNOT_SAVE_FILE + filepath)
-      return
+      if show_alert:
+        self._SendAlertEvent(self.atft_string.ALERT_CANNOT_SAVE_FILE + filepath)
+      return False
     except FastbootFailure as e:
       self._HandleException('E', e)
-      self._SendAlertEvent(
-          alert_cannot_get_file_message + e.msg.encode('utf-8'))
-      return
+      if show_alert:
+        self._SendAlertEvent(
+            alert_cannot_get_file_message + e.msg.encode('utf-8'))
+      return False
     finally:
       self._EndOperation(atfa_dev)
 
     self._SendOperationSucceedEvent(operation)
-    self._SendAlertEvent(alert_message + filepath)
+    if show_alert:
+      self._SendAlertEvent(alert_message + filepath)
+    return True
 
   def _GetSelectedSerials(self):
     """Get the list of selected serial numbers in the device list.
