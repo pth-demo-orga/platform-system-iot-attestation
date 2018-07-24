@@ -30,12 +30,14 @@ import wx
 
 # colors
 COLOR_WHITE = wx.Colour(255, 255, 255)
-COLOR_RED = wx.Colour(194, 40, 40)
+COLOR_RED = wx.Colour(192, 40, 40)
 COLOR_YELLOW = wx.Colour(218, 165, 32)
-COLOR_GREEN = wx.Colour(68, 209, 89)
-COLOR_BLUE = wx.Colour(43, 133, 216)
+COLOR_GREEN = wx.Colour(15, 133, 33)
+COLOR_BLUE = wx.Colour(36, 120, 198)
 COLOR_GREY = wx.Colour(237, 237, 237)
 COLOR_DARK_GREY = wx.Colour(117, 117, 117)
+COLOR_LIGHT_GREY = wx.Colour(247, 247, 247)
+COLOR_LIGHT_GREY_TEXT = wx.Colour(214, 214, 214)
 COLOR_BLACK = wx.Colour(0, 0, 0)
 COLOR_PICK_BLUE = wx.Colour(149, 169, 235)
 
@@ -55,9 +57,10 @@ class MockAtft(atft.Atft):
     self.ShowStartScreen = MagicMock()
     self._CreateThread = self._MockCreateThread
     self.TARGET_DEV_SIZE = 6
+    self.atft_string = MagicMock()
+    self.target_dev_components = MagicMock()
     atft.Atft.__init__(self)
     self.provision_steps = self.DEFAULT_PROVISION_STEPS_PRODUCT
-    self.atft_string = MagicMock()
 
   def _MockParseConfig(self):
     self.atft_version = 'vTest'
