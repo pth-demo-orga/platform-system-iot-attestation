@@ -51,6 +51,7 @@ class MockAtft(atft.Atft):
     self.CreateAtftManager = MagicMock()
     self.CreateAtftLog = MagicMock()
     self.CreateAtftAudit = MagicMock()
+    self.CreateShortCuts = MagicMock()
     self.ParseConfigFile = self._MockParseConfig
     self._SendPrintEvent = MagicMock()
     self._OnToggleSupMode = MagicMock()
