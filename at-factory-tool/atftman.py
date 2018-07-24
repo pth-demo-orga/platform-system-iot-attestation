@@ -338,7 +338,6 @@ class AtftManager(object):
   """The manager to implement ATFA tasks.
 
   Attributes:
-    atfa_dev: A FastbootDevice object identifying the detected ATFA device.
     target_dev: A FastbootDevice object identifying the AT device
       to be provisioned.
   """
@@ -388,8 +387,6 @@ class AtftManager(object):
     self.stable_serials = []
     # The serail numbers for the devices that are only seen once.
     self.pending_serials = []
-    # The atfa device DeviceInfo object.
-    self.atfa_dev = None
     # The list of target devices DeviceInfo objects.
     self.target_devs = []
     # The product information for the selected product.
@@ -397,7 +394,7 @@ class AtftManager(object):
     # The som information for the selected som.
     self.som_info = None
      # The atfa device manager.
-    self._atfa_dev_manager = AtfaDeviceManager(self)
+    self._atfa_dev_manager = AtfaDeviceManager(None)
     # The fastboot controller.
     self._fastboot_device_controller = fastboot_device_controller
     # The map mapping serial number to USB location.
@@ -406,13 +403,20 @@ class AtftManager(object):
     # objects.
     self._reboot_callbacks = {}
 
+  def GetATFADevice(self):
+    return self._atfa_dev_manager.GetATFADevice()
+
   def GetCachedATFAKeysLeft(self):
-    if not self.atfa_dev:
-      return None
-    return self.atfa_dev.keys_left
+    return self._atfa_dev_manager.GetCachedKeysLeft()
 
   def UpdateATFAKeysLeft(self, is_som_key):
-    return self._atfa_dev_manager.UpdateKeysLeft(is_som_key)
+    if not is_som_key and self.product_info:
+      product_som_id = self.product_info.product_id
+    elif is_som_key and self.som_info:
+      product_som_id = self.som_info.som_id
+    else:
+      raise ProductNotSpecifiedException()
+    return self._atfa_dev_manager.UpdateKeysLeft(is_som_key, product_som_id)
 
   def RebootATFA(self):
     return self._atfa_dev_manager.Reboot()
@@ -427,7 +431,13 @@ class AtftManager(object):
     return self._atfa_dev_manager.Update()
 
   def PurgeATFAKey(self, is_som_key):
-    return self._atfa_dev_manager.PurgeKey(is_som_key)
+    if not is_som_key and self.product_info:
+      product_som_id = self.product_info.product_id
+    elif is_som_key and self.som_info:
+      product_som_id = self.som_info.som_id
+    else:
+      raise ProductNotSpecifiedException()
+    return self._atfa_dev_manager.PurgeKey(is_som_key, product_som_id)
 
   def PrepareFile(self, file_type):
     return self._atfa_dev_manager.PrepareFile(file_type)
@@ -523,10 +533,12 @@ class AtftManager(object):
       else:
         new_targets.append(serial)
 
+    current_atfa = self._atfa_dev_manager.GetATFADevice()
+
     if atfa_serial is None:
       # No ATFA device found.
-      self.atfa_dev = None
-    elif self.atfa_dev is None or self.atfa_dev.serial_number != atfa_serial:
+      self._atfa_dev_manager.SetATFADevice(None)
+    elif current_atfa is None or current_atfa.serial_number != atfa_serial:
       self._AddNewAtfa(atfa_serial)
 
     # Remove those devices that are not in new targets and not rebooting.
@@ -591,7 +603,7 @@ class AtftManager(object):
       atfa_dev.GetVar('version')
     except FastbootFailure:
       return
-    self.atfa_dev = atfa_dev
+    self._atfa_dev_manager.SetATFADevice(atfa_dev)
     if self.COMPATIBLE_ATFA_VERSION:
       try:
         atfa_version = int(atfa_dev.GetVar('os-version'))
@@ -819,7 +831,7 @@ class AtftManager(object):
         target.provision_status = ProvisionStatus.PROVISION_ING
       else:
         target.ProvisionStatus = ProvisionStatus.SOM_PROVISION_ING
-      atfa = self.atfa_dev
+      atfa = self._atfa_dev_manager.GetATFADevice()
       AtftManager.CheckDevice(atfa)
       # Set the ATFA's time first.
       self._atfa_dev_manager.SetTime()
@@ -1186,16 +1198,31 @@ class AtftManager(object):
 
 
 class AtfaDeviceManager(object):
-  """The class to manager ATFA device related operations."""
+  """The class to manager ATFA device related operations.
 
-  def __init__(self, atft_manager):
+  Attributes:
+    atfa_dev: A FastbootDevice object identifying the detected ATFA device.
+  """
+
+  def __init__(self, atfa_dev):
     """Initiate the atfa device manager using the at-factory-tool manager.
 
     Args:
       atft_manager: The at-factory-tool manager that
         includes this atfa device manager.
     """
-    self.atft_manager = atft_manager
+    self.atfa_dev = atfa_dev
+
+  def GetATFADevice(self):
+    return self.atfa_dev
+
+  def SetATFADevice(self, atfa_dev):
+    self.atfa_dev = atfa_dev
+
+  def GetCachedKeysLeft(self):
+    if not self.atfa_dev:
+      return None
+    return self.atfa_dev.keys_left
 
   def GetSerial(self):
     """Issue fastboot command to get serial number for the ATFA device.
@@ -1204,8 +1231,8 @@ class AtfaDeviceManager(object):
       DeviceNotFoundException: When the device is not found.
       FastbootFailure: When fastboot command fails.
     """
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    return self.atft_manager.atfa_dev.GetVar('serial')
+    AtftManager.CheckDevice(self.atfa_dev)
+    return self.atfa_dev.GetVar('serial')
 
   def ProcessKey(self):
     """Ask the ATFA device to process the stored key bundle.
@@ -1217,7 +1244,7 @@ class AtfaDeviceManager(object):
     # Need to set time first so that certificates would validate.
     # Set time would check atfa_dev device.
     self.SetTime()
-    self.atft_manager.atfa_dev.Oem('keybundle')
+    self.atfa_dev.Oem('keybundle')
 
   def Update(self):
     """Update the ATFA device.
@@ -1228,7 +1255,7 @@ class AtfaDeviceManager(object):
     """
     # Set time would check atfa_dev device.
     self.SetTime()
-    self.atft_manager.atfa_dev.Oem('update')
+    self.atfa_dev.Oem('update')
 
   def Reboot(self):
     """Reboot the ATFA device.
@@ -1237,8 +1264,8 @@ class AtfaDeviceManager(object):
       DeviceNotFoundException: When the device is not found.
       FastbootFailure: When fastboot command fails.
     """
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    self.atft_manager.atfa_dev.Oem('reboot')
+    AtftManager.CheckDevice(self.atfa_dev)
+    self.atfa_dev.Oem('reboot')
 
   def Shutdown(self):
     """Shutdown the ATFA device.
@@ -1247,10 +1274,10 @@ class AtfaDeviceManager(object):
       DeviceNotFoundException: When the device is not found.
       FastbootFailure: When fastboot command fails.
     """
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    self.atft_manager.atfa_dev.Oem('shutdown')
+    AtftManager.CheckDevice(self.atfa_dev)
+    self.atfa_dev.Oem('shutdown')
 
-  def UpdateKeysLeft(self, is_som_key):
+  def UpdateKeysLeft(self, is_som_key, product_som_id):
     """Update the number of available AT keys for the current product.
 
     Need to use GetCachedATFAKeysLeft() function to get the number of keys left.
@@ -1259,28 +1286,24 @@ class AtfaDeviceManager(object):
 
     Args:
       is_som_key: Whether checking number of som keys (or product keys).
+      product_som_id: The product id/som id.
     Raises:
       FastbootFailure: When fastboot command fails.
-      ProductNotSpecifiedException: When product is not specified.
     """
-    if not is_som_key and self.atft_manager.product_info:
-      product_som_id = self.atft_manager.product_info.product_id
+    if not is_som_key:
       command = 'num-keys '
-    elif is_som_key and self.atft_manager.som_info:
-      product_som_id = self.atft_manager.som_info.som_id
-      command = 'num-som-keys '
     else:
-      raise ProductNotSpecifiedException()
+      command = 'num-som-keys '
 
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
+    AtftManager.CheckDevice(self.atfa_dev)
     try:
-      out = self.atft_manager.atfa_dev.Oem(command + product_som_id, True)
+      out = self.atfa_dev.Oem(command + product_som_id, True)
       # Note: use splitlines instead of split('\n') to prevent '\r\n' problem on
       # windows.
       for line in out.splitlines():
         if line.startswith('(bootloader) '):
           try:
-            self.atft_manager.atfa_dev.keys_left = int(
+            self.atfa_dev.keys_left = int(
                 line.replace('(bootloader) ', ''))
             return
           except ValueError:
@@ -1292,33 +1315,29 @@ class AtfaDeviceManager(object):
       if ('No matching available products' in e.msg or
           'No matching available SoMs' in e.msg):
         # If there's no matching product key, we set keys left to 0.
-        self.atft_manager.atfa_dev.keys_left = 0
+        self.atfa_dev.keys_left = 0
         return
       else:
         # -1 means some error happens.
-        self.atft_manager.atfa_dev.keys_left = -1
+        self.atfa_dev.keys_left = -1
         raise e
 
-  def PurgeKey(self, is_som_key):
+  def PurgeKey(self, is_som_key, product_som_id):
     """Purge the key for the product
 
     Args:
       is_som_key: Whether to purge som key (or product key).
+      product_som_id: The product id/som id.
     Raises:
       DeviceNotFoundException: When the device is not found.
       FastbootFailure: When fastboot command fails.
-      ProductNotSpecifiedException: When product is not specified.
     """
-    if not is_som_key and self.atft_manager.product_info:
-      product_som_id = self.atft_manager.product_info.product_id
+    if not is_som_key:
       command = 'purge '
-    elif is_som_key and self.atft_manager.som_info:
-      product_som_id = self.atft_manager.som_info.som_id
-      command = 'purge-som '
     else:
-      raise ProductNotSpecifiedException()
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    self.atft_manager.atfa_dev.Oem(command + product_som_id)
+      command = 'purge-som '
+    AtftManager.CheckDevice(self.atfa_dev)
+    self.atfa_dev.Oem(command + product_som_id)
 
   def SetTime(self):
     """Inject the host time into the ATFA device.
@@ -1327,9 +1346,9 @@ class AtfaDeviceManager(object):
       DeviceNotFoundException: When the device is not found.
       FastbootFailure: When fastboot command fails.
     """
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
+    AtftManager.CheckDevice(self.atfa_dev)
     time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-    self.atft_manager.atfa_dev.Oem('set-date ' + time)
+    self.atfa_dev.Oem('set-date ' + time)
 
   def PrepareFile(self, file_type):
     """Prepare a file for download.
@@ -1340,5 +1359,5 @@ class AtfaDeviceManager(object):
       DeviceNotFoundException: When the device is not found.
       FastbootFailure: When fastboot command fails.
     """
-    AtftManager.CheckDevice(self.atft_manager.atfa_dev)
-    self.atft_manager.atfa_dev.Oem(file_type)
+    AtftManager.CheckDevice(self.atfa_dev)
+    self.atfa_dev.Oem(file_type)
