@@ -1797,6 +1797,58 @@ class AtftManTest(unittest.TestCase):
     mock_success.assert_not_called()
     mock_fail.assert_not_called()
 
+  @patch('threading.Timer')
+  def testRebootFailureAfterRebootMultipleDevice(self, mock_timer):
+    self.mock_timer_instance = None
+    atft_manager = atftman.AtftManager(self.FastbootDeviceTemplate,
+                                       self.mock_serial_mapper, self.configs)
+    timeout = 1
+    atft_manager.stable_serials = [self.TEST_SERIAL, self.TEST_SERIAL2]
+    mock_fastboot = MagicMock()
+    test_device_1 = atftman.DeviceInfo(
+        mock_fastboot, self.TEST_SERIAL, self.TEST_LOCATION)
+    test_device_2 = atftman.DeviceInfo(
+        mock_fastboot, self.TEST_SERIAL2, self.TEST_LOCATION)
+    atft_manager.target_devs = [test_device_1, test_device_2]
+    mock_success = MagicMock()
+    mock_fail = MagicMock()
+    atft_manager.CheckProvisionStatus = MagicMock()
+    # The check status failed after the reboot
+    atft_manager.CheckProvisionStatus.side_effect = FastbootFailure('')
+    mock_timer.side_effect = self.mock_create_timer
+
+    atft_manager.Reboot(test_device_1, timeout, mock_success, mock_fail)
+    atft_manager.Reboot(test_device_2, timeout, mock_success, mock_fail)
+
+    mock_fastboot.Reboot.assert_called()
+
+    # The timer should still be there.
+    self.assertNotEqual(None, self.mock_timer_instance)
+    # Put serial into stable serials.
+    atft_manager.stable_serials = [self.TEST_SERIAL, self.TEST_SERIAL2]
+    # mock refresh event.
+    with self.assertRaises(DeviceCreationException) as cm:
+      atft_manager._HandleRebootCallbacks()
+
+    self.assertEqual(len(cm.exception.devices), 2)
+    error_message = DeviceCreationException(str(FastbootFailure('')), []).msg
+    self.assertEqual(error_message + '\n' + error_message, cm.exception.msg)
+    self.assertEqual(
+        True,
+        atft_manager._reboot_callbacks[self.TEST_SERIAL].lock.acquire(False))
+    self.assertEqual(
+        True,
+        atft_manager._reboot_callbacks[self.TEST_SERIAL2].lock.acquire(False))
+    atft_manager._reboot_callbacks[self.TEST_SERIAL].Release()
+    atft_manager._reboot_callbacks[self.TEST_SERIAL2].Release()
+
+    # The timer should still be there.
+    self.assertNotEqual(None, self.mock_timer_instance)
+    # Success or fail should not be called.
+    # We would treat this as we have not seen the device.
+    mock_success.assert_not_called()
+    mock_fail.assert_not_called()
+
   # Test AtftManager.ProcessAttributesFile
   def testProcessAttributesFile(self):
     test_content = (
