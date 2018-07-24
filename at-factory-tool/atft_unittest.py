@@ -48,6 +48,7 @@ class MockAtft(atft.Atft):
     self.ChooseProduct = MagicMock()
     self.CreateAtftManager = MagicMock()
     self.CreateAtftLog = MagicMock()
+    self.CreateAtftAudit = MagicMock()
     self.ParseConfigFile = self._MockParseConfig
     self._SendPrintEvent = MagicMock()
     self._OnToggleSupMode = MagicMock()
@@ -110,6 +111,7 @@ class AtftTest(unittest.TestCase):
   TEST_TEXT = 'test-text'
   TEST_TEXT2 = 'test-text2'
   LOG_DIR = 'test-dir'
+  AUDIT_DIR = 'test-audit'
   TEST_TIME = '0000-00-00 00:00:00'
   TEST_TIMESTAMP = 1000
   TEST_PASSWORD1 = 'password 1'
@@ -579,6 +581,35 @@ class AtftTest(unittest.TestCase):
         lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.return_value = test_dev1
+    mock_atft._HandleStateTransition(test_dev1)
+    self.assertEqual(ProvisionStatus.PROVISION_SUCCESS,
+                     test_dev1.provision_status)
+
+  def testHandleStateTransitionSame(self):
+    mock_atft = MockAtft()
+    test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
+                               ProvisionStatus.WAITING)
+    mock_atft._FuseVbootKeyTarget = MagicMock()
+    mock_atft._FuseVbootKeyTarget.side_effect = (
+        lambda target=mock_atft, state=ProvisionStatus.REBOOT_SUCCESS:
+        self.MockStateChange(target, state))
+    mock_atft._FusePermAttrTarget = MagicMock()
+    mock_atft._FusePermAttrTarget.side_effect = (
+        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        self.MockStateChange(target, state))
+    mock_atft._LockAvbTarget = MagicMock()
+    mock_atft._LockAvbTarget.side_effect = (
+        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        self.MockStateChange(target, state))
+    mock_atft._ProvisionTarget = MagicMock()
+    mock_atft._ProvisionTarget.side_effect = (
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        self.MockStateChange(target, state))
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1, self.TEST_SERIAL1]
     mock_atft.auto_prov = True
     mock_atft.atft_manager = MagicMock()
     mock_atft.atft_manager.GetTargetDevice = MagicMock()
@@ -2376,6 +2407,245 @@ class AtftTest(unittest.TestCase):
     mock_atft._SendAlertEvent.assert_not_called()
     self.assertNotEqual(
         mock_atft.DEFAULT_PROVISION_STEPS_PRODUCT, mock_atft.provision_steps)
+
+  # Test AtftLog.Initialize()
+  def IncreaseMockTime(self, format):
+    self.mock_time += 1
+    return str(self.mock_time - 1)
+
+  def CreateAuditFiles(self, file_path, file_type, show_alert):
+    self.mock_audit_files.append(os.path.basename(file_path))
+    return True
+
+  def RemoveAuditFiles(self, file_path):
+    self.mock_audit_files.remove(os.path.basename(file_path))
+
+  @patch('os.mkdir')
+  @patch('datetime.datetime')
+  @patch('os.path.isfile')
+  @patch('os.remove')
+  @patch('os.listdir')
+  def testAtftAudit(
+      self, mock_listdir, mock_remove, mock_isfile, mock_datetime,
+      mock_makedir):
+    download_interval = 2
+    get_file_handler = MagicMock()
+    get_file_handler.side_effect = self.CreateAuditFiles
+    get_atfa_serial = MagicMock()
+    get_atfa_serial.return_value = self.TEST_SERIAL1
+    mock_remove.side_effect = self.RemoveAuditFiles
+    mock_time = MagicMock()
+    mock_datetime.utcnow.return_value = mock_time
+    mock_time.strftime.side_effect = self.IncreaseMockTime
+    mock_isfile.return_value = True
+
+    audit_file_path_0 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_0.audit')
+    audit_file_path_1 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_1.audit')
+    audit_file_path_2 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_2.audit')
+    audit_file_path_3 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_3.audit')
+
+    self.mock_audit_files = []
+    self.mock_time = 0
+    mock_listdir.return_value = self.mock_audit_files
+
+    test_audit = atft.AtftAudit(
+        self.AUDIT_DIR,
+        download_interval,
+        get_file_handler,
+        get_atfa_serial)
+    mock_makedir.assert_called_with(self.AUDIT_DIR)
+    test_audit.PullAudit(10)
+    get_file_handler.assert_called_once_with(audit_file_path_0, 'audit', False)
+    mock_remove.assert_not_called()
+    get_file_handler.reset_mock()
+    test_audit.PullAudit(9)
+    get_file_handler.assert_not_called()
+    test_audit.PullAudit(8)
+    get_file_handler.assert_called_once_with(audit_file_path_1, 'audit', False)
+    mock_remove.assert_called_once_with(audit_file_path_0)
+    mock_remove.reset_mock()
+    get_file_handler.reset_mock()
+    test_audit.PullAudit(7)
+    get_file_handler.assert_not_called()
+    test_audit.PullAudit(6)
+    get_file_handler.assert_called_once_with(audit_file_path_2, 'audit', False)
+    get_file_handler.reset_mock()
+    mock_remove.assert_called_once_with(audit_file_path_1)
+    mock_remove.reset_mock()
+    test_audit.ResetKeysLeft()
+    test_audit.PullAudit(10)
+    get_file_handler.assert_called_once_with(audit_file_path_3, 'audit', False)
+    mock_remove.assert_called_once_with(audit_file_path_2)
+
+  @patch('os.mkdir')
+  @patch('datetime.datetime')
+  @patch('os.path.isfile')
+  @patch('os.remove')
+  @patch('os.listdir')
+  def testAtftAuditRemoveMultipleFiles(
+      self, mock_listdir, mock_remove, mock_isfile, mock_datetime,
+      mock_makedir):
+    download_interval = 2
+    get_file_handler = MagicMock()
+    get_file_handler.side_effect = self.CreateAuditFiles
+    get_atfa_serial = MagicMock()
+    get_atfa_serial.return_value = self.TEST_SERIAL1
+    mock_remove.side_effect = self.RemoveAuditFiles
+    mock_time = MagicMock()
+    mock_datetime.utcnow.return_value = mock_time
+    mock_time.strftime.side_effect = self.IncreaseMockTime
+    mock_isfile.return_value = True
+
+    audit_file_path_0 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_0.audit')
+    audit_file_path_1 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_1.audit')
+    audit_file_path_2 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_2.audit')
+    audit_file_path_3 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_3.audit')
+
+    # If more than one files for one ATFA left, must remove them all.
+    self.mock_audit_files = [
+        self.TEST_SERIAL1 + '_0.audit',
+        self.TEST_SERIAL1 + '_1.audit',
+        self.TEST_SERIAL1 + '_2.audit']
+    self.mock_time = 3
+    mock_listdir.return_value = self.mock_audit_files
+
+    test_audit = atft.AtftAudit(
+        self.AUDIT_DIR,
+        download_interval,
+        get_file_handler,
+        get_atfa_serial)
+    test_audit.PullAudit(10)
+    get_file_handler.assert_called_once_with(audit_file_path_3, 'audit', False)
+    mock_remove.assert_has_calls([
+        call(audit_file_path_0),
+        call(audit_file_path_1),
+        call(audit_file_path_2)])
+
+  @patch('os.mkdir')
+  @patch('datetime.datetime')
+  @patch('os.path.isfile')
+  @patch('os.remove')
+  @patch('os.listdir')
+  def testAtftAuditRemoveMultipleFiles(
+      self, mock_listdir, mock_remove, mock_isfile, mock_datetime,
+      mock_makedir):
+    download_interval = 2
+    get_file_handler = MagicMock()
+    get_atfa_serial = MagicMock()
+    get_atfa_serial.return_value = self.TEST_SERIAL1
+    mock_remove.side_effect = self.RemoveAuditFiles
+    mock_time = MagicMock()
+    mock_datetime.utcnow.return_value = mock_time
+    mock_time.strftime.side_effect = self.IncreaseMockTime
+    mock_isfile.return_value = True
+
+    # If get file fails, must not remove file.
+    get_file_handler.return_value = False
+
+    audit_file_path_0 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_0.audit')
+    audit_file_path_1 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_1.audit')
+    audit_file_path_2 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_2.audit')
+    audit_file_path_3 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_3.audit')
+
+    self.mock_audit_files = [
+        self.TEST_SERIAL1 + '_0.audit',
+        self.TEST_SERIAL1 + '_1.audit',
+        self.TEST_SERIAL1 + '_2.audit']
+    self.mock_time = 3
+    mock_listdir.return_value = self.mock_audit_files
+
+    test_audit = atft.AtftAudit(
+        self.AUDIT_DIR,
+        download_interval,
+        get_file_handler,
+        get_atfa_serial)
+    test_audit.PullAudit(10)
+    get_file_handler.assert_called_once_with(audit_file_path_3, 'audit', False)
+    mock_remove.assert_not_called()
+
+  @patch('os.mkdir')
+  @patch('datetime.datetime')
+  @patch('os.path.isfile')
+  @patch('os.remove')
+  @patch('os.listdir')
+  def testAtftAuditMultipleATFAs(
+      self, mock_listdir, mock_remove, mock_isfile, mock_datetime,
+      mock_makedir):
+    download_interval = 2
+    get_file_handler = MagicMock()
+    get_file_handler.side_effect = self.CreateAuditFiles
+    get_atfa_serial = MagicMock()
+    get_atfa_serial.return_value = self.TEST_SERIAL1
+    mock_remove.side_effect = self.RemoveAuditFiles
+    mock_time = MagicMock()
+    mock_datetime.utcnow.return_value = mock_time
+    mock_time.strftime.side_effect = self.IncreaseMockTime
+    mock_isfile.return_value = True
+
+    audit_file_path_1_0 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_0.audit')
+    audit_file_path_2_1 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL2 + '_1.audit')
+    audit_file_path_1_2 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL1 + '_2.audit')
+    audit_file_path_2_3 = os.path.join(
+        self.AUDIT_DIR, self.TEST_SERIAL2 + '_3.audit')
+
+    self.mock_audit_files = []
+    self.mock_time = 0
+    mock_listdir.return_value = self.mock_audit_files
+
+    test_audit = atft.AtftAudit(
+        self.AUDIT_DIR,
+        download_interval,
+        get_file_handler,
+        get_atfa_serial)
+    test_audit.PullAudit(10)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_1_0, 'audit', False)
+    mock_remove.assert_not_called()
+    get_file_handler.reset_mock()
+
+    # Insert a new ATFA
+    test_audit.ResetKeysLeft()
+    get_atfa_serial.return_value = self.TEST_SERIAL2
+    test_audit.PullAudit(10)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_2_1, 'audit', False)
+    mock_remove.assert_not_called()
+    get_file_handler.reset_mock()
+
+    # Insert the old one back
+    test_audit.ResetKeysLeft()
+    get_atfa_serial.return_value = self.TEST_SERIAL1
+    test_audit.PullAudit(9)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_1_2, 'audit', False)
+    mock_remove.assert_called_once_with(audit_file_path_1_0)
+    mock_remove.reset_mock()
+    get_file_handler.reset_mock()
+
+    # Insert ATFA2 back
+    test_audit.ResetKeysLeft()
+    get_atfa_serial.return_value = self.TEST_SERIAL2
+    test_audit.PullAudit(9)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_2_3, 'audit', False)
+    mock_remove.assert_called_once_with(audit_file_path_2_1)
+    mock_remove.reset_mock()
+    get_file_handler.reset_mock()
 
 
 if __name__ == '__main__':
