@@ -3586,10 +3586,10 @@ class Atft(wx.Frame):
       finally:
         self.listing_device_lock.release()
     except ProductNotSpecifiedException as e:
-      self._HandleException('W', e, operation)
+      self._HandleException('W', e, operation, [target])
       return
     except FastbootFailure as e:
-      self._HandleException('E', e, operation)
+      self._HandleException('E', e, operation, [target])
       return
     finally:
       self._EndOperation(target)
@@ -3605,7 +3605,7 @@ class Atft(wx.Frame):
     if target and not target.provision_state.bootloader_locked:
       target.provision_status = ProvisionStatus.FUSEVBOOT_FAILED
       e = FastbootFailure('Status not updated.')
-      self._HandleException('E', e, operation)
+      self._HandleException('E', e, operation, [target])
       return
 
   def _RebootSuccessCallback(self, msg, lock):
@@ -3668,10 +3668,10 @@ class Atft(wx.Frame):
     try:
       self.atft_manager.FusePermAttr(target)
     except ProductNotSpecifiedException as e:
-      self._HandleException('W', e, operation)
+      self._HandleException('W', e, operation, [target])
       return
     except FastbootFailure as e:
-      self._HandleException('E', e, operation)
+      self._HandleException('E', e, operation, [target])
       return
     finally:
       self._EndOperation(target)
@@ -3716,7 +3716,7 @@ class Atft(wx.Frame):
     try:
       self.atft_manager.LockAvb(target)
     except FastbootFailure as e:
-      self._HandleException('E', e, operation)
+      self._HandleException('E', e, operation, [target])
       return
     finally:
       self._EndOperation(target)
@@ -3756,7 +3756,7 @@ class Atft(wx.Frame):
     try:
       self.atft_manager.UnlockAvb(target)
     except FastbootFailure as e:
-      self._HandleException('E', e, operation)
+      self._HandleException('E', e, operation, [target])
       return
     finally:
       self._EndOperation(target)
@@ -3805,7 +3805,7 @@ class Atft(wx.Frame):
       self._HandleException('W', e, operation)
       return
     except FastbootFailure as e:
-      self._HandleException('E', e, operation, atfa_dev)
+      self._HandleException('E', e, operation, [atfa_dev])
       return
     finally:
       self._EndOperation(atfa_dev)
@@ -3827,7 +3827,7 @@ class Atft(wx.Frame):
       self._HandleException('W', e, operation)
       return
     except FastbootFailure as e:
-      self._HandleException('E', e, operation, atfa_dev)
+      self._HandleException('E', e, operation, [atfa_dev])
       return
     finally:
       self._EndOperation(atfa_dev)
@@ -3868,10 +3868,10 @@ class Atft(wx.Frame):
       self.atft_manager.Provision(target, is_som_key)
     except DeviceNotFoundException as e:
       e.SetMsg('No Available ATFA!')
-      self._HandleException('W', e, operation, target)
+      self._HandleException('W', e, operation, [target])
       return
     except FastbootFailure as e:
-      self._HandleException('E', e, operation, target)
+      self._HandleException('E', e, operation, [target])
       # If it fails, one key might also be used.
       self._UpdateKeysLeftInATFA()
       return
