@@ -3110,7 +3110,7 @@ class Atft(wx.Frame):
     evt = Event(self.print_event, wx.ID_ANY, msg)
     wx.QueueEvent(self, evt)
 
-  def _StartOperation(self, operation, target):
+  def _StartOperation(self, operation, target, show_alert=True):
     if not target:
       self.PauseRefresh()
       return True
@@ -3120,9 +3120,11 @@ class Atft(wx.Frame):
       self.PauseRefresh()
       return True
 
-    self._SendAlertEvent(
-        'Target: ' + str(target) + ' is currently in another operation: '  +
-        target.operation + '. Please try again later')
+    if show_alert:
+      self._SendAlertEvent(
+          'Unable to start operation: ' + operation + ', ' +
+          'Target: ' + str(target) + ' is currently in another operation: '  +
+          target.operation + '. Please try again later')
     return False
 
   def _EndOperation(self, target):
@@ -4069,7 +4071,7 @@ class Atft(wx.Frame):
       # Should not reach here.
       return False
     operation = 'ATFA device prepare and download ' + file_type + ' file'
-    if not self._StartOperation(operation, atfa_dev):
+    if not self._StartOperation(operation, atfa_dev, show_alert):
       return False
     try:
       filepath = filepath.encode('utf-8')
