@@ -1,0 +1,37 @@
+cc_library {
+    name: "libepid",
+    defaults: ["epid_cflags"],
+    srcs: [
+        "interface/*.c",
+    ],
+    export_include_dirs: [
+        "interface",
+    ],
+    static_libs: [
+        "libepid_verifier",
+        "libepid_member",
+        "libepid_common",
+        "libepid_util",
+        "libippcp",
+    ],
+    stl: "none",
+}
+
+cc_test {
+    name: "libepid_utest",
+    defaults: ["epid_cflags"],
+    srcs: [
+        "test/*.cc",
+    ],
+    static_libs: [
+        "libepid",
+        "libepid_verifier",
+        "libepid_member",
+        "libepid_common",
+        "libepid_util",
+        "libippcp",
+    ],
+    shared_libs: [
+        "libchrome",
+    ],
+}
