@@ -3900,10 +3900,9 @@ class Atft(wx.Frame):
     self.auto_prov_lock.acquire()
     serial = target.serial_number
     i = 0
-    while not ProvisionStatus.isFailed(target.provision_status):
+    while True:
       target = self.atft_manager.GetTargetDevice(serial)
-      if not target:
-        # The target disappear somehow.
+      if not target or ProvisionStatus.isFailed(target.provision_status):
         break
       if not self.auto_prov:
         # Auto provision mode exited.
