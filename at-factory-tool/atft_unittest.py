@@ -687,6 +687,106 @@ class AtftTest(unittest.TestCase):
     self.assertEqual(ProvisionStatus.REBOOT_FAILED, test_dev1.provision_status)
     mock_atft._SendOperationSucceedEvent.assert_not_called()
 
+  def mockGetTargetDeviceDisappear(self, dev):
+    # If the device disappear, return None as target device.
+    if self.target_device_disapper:
+      return None
+    else:
+      return dev
+
+  def mockDeviceRebootTimeout(self, target, auto_prov):
+    # After reboot, the device disappear.
+    self.target_device_disapper = True
+
+  # Test device reboot timeout and disappear from device list.
+  def testHandleStateTransitionRebootTimeout(self):
+    mock_atft = MockAtft()
+    self.target_device_disapper = False
+    mock_atft._SendOperationSucceedEvent = MagicMock()
+    test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
+                               ProvisionStatus.WAITING)
+    mock_atft._FuseVbootKeyTarget = MagicMock()
+    mock_atft._FuseVbootKeyTarget.side_effect = self.mockDeviceRebootTimeout
+    mock_atft._FusePermAttrTarget = MagicMock()
+    mock_atft._FusePermAttrTarget.side_effect = (
+        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        self.MockStateChange(target, state))
+    mock_atft._LockAvbTarget = MagicMock()
+    mock_atft._LockAvbTarget.side_effect = (
+        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        self.MockStateChange(target, state))
+    mock_atft._ProvisionTarget = MagicMock()
+    mock_atft._ProvisionTarget.side_effect = (
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+            self.MockStateChange(target, state))
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.side_effect = (
+        lambda serial, dev=test_dev1: self.mockGetTargetDeviceDisappear(dev))
+    mock_atft._HandleStateTransition(test_dev1)
+    self.assertEqual(
+        None, mock_atft.atft_manager.GetTargetDevice(self.TEST_SERIAL1))
+    mock_atft._SendOperationSucceedEvent.assert_not_called()
+
+  def mockGetTargetDeviceFuseVbootFailed(self, dev):
+    # If the device disappear, return None as target device.
+    if self.target_device_fuse_failed:
+      new_device = TestDeviceInfo(
+          dev.serial_number, dev.location, ProvisionStatus.FUSEVBOOT_FAILED)
+      return new_device
+    else:
+      return dev
+
+  def mockDeviceFuseVbootFailed(self, target, auto_prov):
+    # After reboot, the device disappear.
+    self.target_device_fuse_failed = True
+    target.provision_status = ProvisionStatus.REBOOT_ING
+
+  # Test fuse vboot key change target device state by creating a new target
+  # device instead of modifying the original one's state.
+  def testHandleStateTransitionTargetDeviceChange(self):
+    mock_atft = MockAtft()
+    self.target_device_fuse_failed = False
+    mock_atft._SendOperationSucceedEvent = MagicMock()
+    test_dev1 = TestDeviceInfo(self.TEST_SERIAL1, self.TEST_LOCATION1,
+                               ProvisionStatus.WAITING)
+    mock_atft._FuseVbootKeyTarget = MagicMock()
+    mock_atft._FuseVbootKeyTarget.side_effect = self.mockDeviceFuseVbootFailed
+    mock_atft._FusePermAttrTarget = MagicMock()
+    mock_atft._FusePermAttrTarget.side_effect = (
+        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        self.MockStateChange(target, state))
+    mock_atft._LockAvbTarget = MagicMock()
+    mock_atft._LockAvbTarget.side_effect = (
+        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        self.MockStateChange(target, state))
+    mock_atft._ProvisionTarget = MagicMock()
+    mock_atft._ProvisionTarget.side_effect = (
+        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+            self.MockStateChange(target, state))
+    mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
+    mock_atft.auto_prov = True
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice = MagicMock()
+    mock_atft.atft_manager.GetTargetDevice.side_effect = (
+        lambda serial, dev=test_dev1: self.mockGetTargetDeviceFuseVbootFailed(
+            dev))
+    mock_atft._HandleStateTransition(test_dev1)
+
+    # The old target device is still in REBOOT_ING state.
+    self.assertEqual(ProvisionStatus.REBOOT_ING, test_dev1.provision_status)
+
+    # The new device is in FUSEVBOOT_FAILED state
+    self.assertEqual(
+        ProvisionStatus.FUSEVBOOT_FAILED,
+        mock_atft.atft_manager.GetTargetDevice(
+            self.TEST_SERIAL1).provision_status)
+    mock_atft._SendOperationSucceedEvent.assert_not_called()
+    # Next operation should not execute.
+    mock_atft._FusePermAttrTarget.assert_not_called()
+
   def testHandleStateTransitionFuseAttrFail(self):
     mock_atft = MockAtft()
     mock_atft._SendOperationSucceedEvent = MagicMock()
