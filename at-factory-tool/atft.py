@@ -175,11 +175,14 @@ class AtftString(object):
     self.TITLE_TARGET_DEV = ['Target Devices', '目标设备'][index]
     self.TITLE_COMMAND_OUTPUT = ['Command Output', '控制台输出'][index]
     self.TITLE_MAP_USB = [
-        'Insert one ATFA device into the USB port you want to map, then select '
-        'one of the six corresponding\nUI slots. This UI slot would be '
-        'mapped to the USB port with the ATFA plugged in.',
-        '将一个ATFA设备插入到你想关联的USB接口，然后选择界面上六个目标设备位置中的一个。\n'
-        '这个目标设备位置将被关联到你插入ATFA设备的USB接口'][index]
+        'Auto map: Click \'Remap\' button, the UI slots would be randomly '
+        'mapped to one of the connected Android Things device. \n'
+        'Manual map: Insert one Android Things device into the USB port you '
+        'want to map, \nthen select one of the six corresponding UI slots and '
+        'click \'Map\' button.',
+        '自动关联：点击\'自动关联\', 界面上的目标设备将会分配给任意已经连接的Android '
+        'Things设备。\n手动关联：将一个Android Things设备插入到你想关联的USB接口，'
+        '然后选择界面上六个目标设备位置中的一个并点击\'关联\'。'][index]
     self.TITLE_FIRST_WARNING = ['1st\twarning: ', '警告一：'][index]
     self.TITLE_SECOND_WARNING = ['2nd\twarning: ', '警告二：'][index]
     self.TITLE_SELECT_LANGUAGE = ['Select a language', '选择一种语言'][index]
@@ -216,6 +219,7 @@ class AtftString(object):
     self.BUTTON_MAP_USB_LOCATION = ['Map USB Locations', '关联USB位置'][index]
     self.BUTTON_LANGUAGE_PREFERENCE = ['Language Preference', '语言偏好'][index]
     self.BUTTON_SET_PASSWORD = ['Set Password', '设置密码'][index]
+    self.BUTTON_AUTOMAP = ['Automap', '自动关联'][index]
     self.BUTTON_REMAP = ['Remap', '重新关联'][index]
     self.BUTTON_MAP = ['Map', '关联'][index]
     self.BUTTON_CANCEL = ['Cancel', '取消'][index]
@@ -329,6 +333,11 @@ class AtftString(object):
             ('设备位置' + slot.encode('utf-8') +
              '已经被关联到USB位置' + location.encode('utf-8') + ', 是否覆盖?')
         ][index]
+    self.ALERT_REMAP_ALL = [
+        'Auto mapping would overwrite previous configure, do you want to '
+        'continue?',
+        '自动关联将会覆盖之前的关联配置，是否继续？'
+        ][index]
     self.ALERT_ADD_MORE_KEY = [
         lambda keys_left:
             'Warning - add more keys\n'
@@ -401,10 +410,17 @@ class AtftString(object):
         'continue?',
         '检测到已经有一个相同的程序在运行，如果继续运行可能会导致错误，确定要'
         '继续吗？'][index]
+    self.ALERT_NO_TARGET_DEVICE = [
+        'No Android Things device detected, please make sure your device is in '
+        'fastboot mode.',
+        '没有检测到已连接的Android Things设备，请确保设备在fastboot状态。'][index]
+    self.ALERT_MULTIPLE_TARGET_DEVICE = [
+        'More than one Android Things connected, please only plug in the one '
+        'you want to map.',
+        '检测到多个已连接的Android Things设备，请确保仅有一个想要关联的设备。'][index]
 
     self.STATUS_MAPPED = ['Mapped', '已关联位置'][index]
     self.STATUS_NOT_MAPPED = ['Not mapped', '未关联位置'][index]
-    self.STATUS_MAPPING = ['Mapping', '正在关联'][index]
 
 
 class AtftAudit(object):
@@ -890,22 +906,22 @@ class AppSettingsDialog(wx.Dialog):
   """
 
   def __init__(self, atft_string,
-               map_usb_location_handler,
+               auto_map_usb_location_handler,
+               manual_map_usb_location_handler,
                map_usb_to_slot_handler,
                change_language_handler,
                change_password_handler,
-               cleanup_handler,
                language_index,
                device_usb_locations):
     """Initiate the dialog using the atft class instance.
 
     Args:
       atft_string: The class for string constants.
-      map_usb_location_handler: The handler for clicking 'map' button
+      auto_map_usb_location_handler: The handler for clicking 'automap' button.
+      manual_map_usb_location_handler: The handler for clicking 'map' button.
       map_usb_to_slot_handler: The handler for clicking each slot.
       change_language_handler: The handler for changing language.
       change_password_handler: The handler for changing password.
-      cleanup_handler: The handler for cleaning up status.
       language_index: The language index.
       device_usb_locations: The device usb location mapping.
     """
@@ -913,11 +929,11 @@ class AppSettingsDialog(wx.Dialog):
     self.settings = []
     self.menu_items = []
     self.current_setting = None
-    self.map_usb_location_handler = map_usb_location_handler
+    self.auto_map_usb_location_handler = auto_map_usb_location_handler
+    self.manual_map_usb_location_handler = manual_map_usb_location_handler
     self.map_usb_to_slot_handler = map_usb_to_slot_handler
     self.change_language_handler = change_language_handler
     self.change_password_handler = change_password_handler
-    self.cleanup_handler = cleanup_handler
     self.language_index = language_index
     self.device_usb_locations = device_usb_locations
 
@@ -966,26 +982,33 @@ class AppSettingsDialog(wx.Dialog):
         id=wx.ID_CANCEL)
     button_map = wx.Button(
         self, label=self.atft_string.BUTTON_MAP, size=(130, 30), id=wx.ID_ANY)
-    button_font = wx.Font(12, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    button_automap = wx.Button(
+        self, label=self.atft_string.BUTTON_AUTOMAP, size=(130, 30),
+        id=wx.ID_ANY)
     button_save = wx.Button(
         self, label=self.atft_string.BUTTON_SAVE, size=(130, 30), id=wx.ID_ANY)
+    button_font = wx.Font(12, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
     button_map.SetFont(button_font)
+    button_automap.SetFont(button_font)
     button_cancel.SetFont(button_font)
     button_save.SetFont(button_font)
 
     buttons_sizer.Add(button_cancel)
     buttons_sizer.Add(button_map, 0, wx.LEFT, 10)
+    buttons_sizer.Add(button_automap, 0, wx.LEFT, 10)
     buttons_sizer.Add(button_save, 0, wx.LEFT, 10)
 
     self.button_cancel = button_cancel
     self.button_map = button_map
+    self.button_automap = button_automap
     self.button_save = button_save
     self.buttons_sizer = buttons_sizer
     self.panel_sizer.AddSpacer(20)
     self.panel_sizer.Add(buttons_sizer, 0, wx.ALIGN_RIGHT | wx.RIGHT, 10)
 
     # Bind handlers
-    self.button_map.Bind(wx.EVT_BUTTON, self.map_usb_location_handler)
+    self.button_map.Bind(wx.EVT_BUTTON, self.manual_map_usb_location_handler)
+    self.button_automap.Bind(wx.EVT_BUTTON, self.auto_map_usb_location_handler)
     self.button_cancel.Bind(wx.EVT_BUTTON, self.OnExit)
     self.button_save.Bind(wx.EVT_BUTTON, self.OnSaveSetting)
 
@@ -1009,7 +1032,7 @@ class AppSettingsDialog(wx.Dialog):
     usb_mapping_panel_sizer.Add(usb_mapping_title, 0, wx.EXPAND | wx.ALL, 10)
     usb_mapping_panel_sizer.AddSpacer(10)
     usb_mapping_title_font = wx.Font(
-        12, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+        10, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
     usb_mapping_title.SetFont(usb_mapping_title_font)
     self.dev_mapping_components = Atft.CreateTargetDeviceList(
         usb_mapping_panel, usb_mapping_panel_sizer, True)
@@ -1142,6 +1165,7 @@ class AppSettingsDialog(wx.Dialog):
     """
     self.button_save.Hide()
     self.button_map.Show()
+    self.button_automap.Show()
     self.buttons_sizer.Layout()
     self.current_setting = self.usb_mapping_panel
     self.current_menu = self.menu_map_usb
@@ -1155,6 +1179,7 @@ class AppSettingsDialog(wx.Dialog):
     """
     self.button_save.Show()
     self.button_map.Hide()
+    self.button_automap.Hide()
     self.buttons_sizer.Layout()
     self.current_setting = self.language_setting
     self.current_menu = self.menu_language
@@ -1163,6 +1188,7 @@ class AppSettingsDialog(wx.Dialog):
   def ShowPasswordSetting(self, event):
     self.button_save.Show()
     self.button_map.Hide()
+    self.button_automap.Hide()
     self.buttons_sizer.Layout()
     self.current_setting = self.password_setting
     self.current_menu = self.menu_set_password
@@ -1204,7 +1230,6 @@ class AppSettingsDialog(wx.Dialog):
     """
     self.original_password_input.SetValue('')
     self.new_password_input.SetValue('')
-    self.cleanup_handler()
     event.Skip()
 
 
@@ -1281,10 +1306,6 @@ class Atft(wx.Frame):
 
     # The target devices refresh timer object.
     self.refresh_timer = None
-
-    # The callback to wait for the appearance of an ATFA device for USB location
-    # mapping.
-    self.wait_atfa_callback = None
 
     # The field to sort target devices
     self.sort_by = self.atft_manager.SORT_BY_LOCATION
@@ -1791,11 +1812,11 @@ class Atft(wx.Frame):
     # App Settings Dialog
     self.app_settings_dialog = AppSettingsDialog(
         self.atft_string,
-        self.MapUSBLocationToSlot,
+        self.AutoMapUSBLocationToSlot,
+        self.ManualMapUSBLocationToSlot,
         self.MapUSBToSlotHandler,
         self.ChangeLanguage,
         self.ChangePassword,
-        self.ClearATFADiscoveryCallback,
         self.GetLanguageIndex(),
         self.device_usb_locations)
     self.app_settings_dialog.CreateDialog(
@@ -2989,7 +3010,6 @@ class Atft(wx.Frame):
     self.Bind(self.select_file_event_bind, self._SelectFileEventHandler)
     self.Bind(self.save_file_event_bind, self._SaveFileEventHandler)
     self.Bind(self.update_mapping_status_bind, self._UpdateMappingStatusHandler)
-    self.Bind(self.map_usb_success_bind, self.MapUSBToSlotSuccessMainThread)
 
     i = 0
     for dev_component in self.target_dev_components:
@@ -3225,7 +3245,7 @@ class Atft(wx.Frame):
       self._HandleAutoProv()
 
     self._PrintAtfaDevice()
-    self._HandleATFADiscovery()
+
     if self.last_target_list == self.atft_manager.target_devs:
       # Nothing changes, no need to refresh
       return
@@ -4117,12 +4137,12 @@ class Atft(wx.Frame):
       i += 1
     return selected_serials
 
-  def MapUSBLocationToSlot(self, event):
+  def ManualMapUSBLocationToSlot(self, event):
     """The handler to map a USB location to an UI slot in the tool.
 
     This handler would be triggered if the 'map' button on the USB Location
-    Mapping interface is clicked. We need to wait for an ATFA device to appear
-    at a location and then map this location to a target device slot on the UI.
+    Mapping interface is clicked. It would map the connected Android Things
+    device to the selected UI slot.
 
     Args:
       event: The triggering event.
@@ -4136,120 +4156,70 @@ class Atft(wx.Frame):
       self._SendAlertEvent(self.atft_string.ALERT_NO_MAP_DEVICE_CHOSEN)
       return
 
-    self.ClearATFADiscoveryCallback()
-
     component = selected[0]
+    index = component.index
 
-    if self.device_usb_locations[component.index]:
+    if self.device_usb_locations[index]:
       # If this slot was already mapped, warn the user.
       warning_message = self.atft_string.ALERT_REMAP_SLOT_LOCATION(
           str(component.index + 1), self.device_usb_locations[component.index])
       if not self._ShowWarning(warning_message):
         return
 
-    # Need to call parent.layout to refresh
-    component.status.SetLabel(self.atft_string.STATUS_MAPPING)
-    component.status.GetParent().Layout()
-    component.status_wrapper.Layout()
-
-    success_callback = (
-        lambda location, component=component :
-        self.MapUSBToSlotSuccess(location, component))
-    fail_callback = (
-        lambda component=component : self.MapUSBToSlotTimeout(component))
-    # Wait for an ATFA device to show up at the selected slot.
-    self.wait_atfa_callback = RebootCallback(
-        self.atfa_reboot_timeout, success_callback, fail_callback)
-
-  def ClearATFADiscoveryCallback(self):
-    """Cancel a currently waiting for ATFA device and cancel the callback.
-    """
-    if not self.wait_atfa_callback:
+    if not self.atft_manager.target_devs:
+      self._SendAlertEvent(self.atft_string.ALERT_NO_TARGET_DEVICE)
       return
-    lock = self.wait_atfa_callback.lock
-    # If there's no callback current happening on this ATFA device, Release the
-    # lock and the structure allocated to it.
-    if lock and lock.acquire(False):
-      # Remember to release the lock when the success callback is finished.
-      self.wait_atfa_callback.Release()
 
-    # If some of the mapping status is 'mapping', change them to the correct
-    # status.
-    self.app_settings_dialog.UpdateMappingStatus()
-
-  def _HandleATFADiscovery(self):
-    """This function handles ATFA device discovery.
-
-    This function would call the success callback if an atfa device is found.
-    """
-    if not self.atft_manager.GetATFADevice() or not self.wait_atfa_callback:
+    if len(self.atft_manager.target_devs) > 1:
+      self._SendAlertEvent(self.atft_string.ALERT_MULTIPLE_TARGET_DEVICE)
       return
-    # If we are waiting for an ATFA and we find one.
-    lock = self.wait_atfa_callback.lock
-    location = self.atft_manager.GetATFADevice().location
-    if lock and lock.acquire(False):
-      self.wait_atfa_callback.success(location)
 
-  class MapUSBToSlotArgs(object):
+    location = self.atft_manager.target_devs[0].location
 
-    def __init__(self, location, index):
-      self.location = location
-      self.index = index
-
-  def MapUSBToSlotSuccess(self, location, component):
-    """The success callback for location mapping.
-
-    Note that we need to have UI operations and this callback would be called
-    within a different thread, thus we need to use event to let the
-    MapUSBToSlotSuccessMainThread to actually handles the callback.
-
-    Args:
-      location: The USB location to be mapped.
-      component: The UI component to be mapped to the location.
-    """
-    evt = Event(
-        self.map_usb_success_event, wx.ID_ANY,
-        self.MapUSBToSlotArgs(location, component.index))
-    wx.QueueEvent(self, evt)
-
-  def MapUSBToSlotSuccessMainThread(self, event):
-    """The success callback if we find an atfa device.
-
-    We map the selected slot to the location where we find the device. We also
-    release the resources after the callback.
-    """
-    location = event.GetValue().location
-    index = event.GetValue().index
     # Check if the location is already mounted to a slot, if so gives a warning
     # since this mapping would overwrite previous configuration.
     for i in range(TARGET_DEV_SIZE):
       if (self.device_usb_locations[i] and
-          self.device_usb_locations[i] == location and i != index):
+          self.device_usb_locations[i] == location and i != component.index):
         warning_text = self.atft_string.ALERT_REMAP_LOCATION_SLOT(
             self.device_usb_locations[i], str(i + 1))
         if not self._ShowWarning(warning_text):
           self.SendUpdateMappingEvent()
-          self.wait_atfa_callback.Release()
-          self.wait_atfa_callback = None
           return
         else:
           self.device_usb_locations[i] = None
 
     self.device_usb_locations[index] = location
     self.SendUpdateMappingEvent()
-    # Finished handling the success callback, release the callback lock.
-    self.wait_atfa_callback.Release()
-    self.wait_atfa_callback = None
 
-  def MapUSBToSlotTimeout(self, component):
-    """The callback when an ATFA device is not found before timeout.
+  def AutoMapUSBLocationToSlot(self, event):
+    """The handler to map connected target devices to UI slots in the tool.
 
-    This means the mapping operation times out.
+    This handler would be triggered if the 'automap' button on the USB Location
+    Mapping interface is clicked. It would randomly map the connected Android
+    Things device to the UI slots.
+
+    Args:
+      event: The triggering event.
     """
-    self._SendAlertEvent(self.atft_string.ALERT_MAP_DEVICE_TIMEOUT)
+    for i in range(TARGET_DEV_SIZE):
+      if (self.device_usb_locations[i]):
+        if not self._ShowWarning(self.atft_string.ALERT_REMAP_ALL):
+          return
+        else:
+          break
+
+    if not self.atft_manager.target_devs:
+      self._SendAlertEvent(self.atft_string.ALERT_NO_TARGET_DEVICE)
+      return
+
+    for i in range(TARGET_DEV_SIZE):
+      if i >= len(self.atft_manager.target_devs):
+        self.device_usb_locations[i] = None
+        continue
+      self.device_usb_locations[i] = self.atft_manager.target_devs[i].location
+
     self.SendUpdateMappingEvent()
-    self.wait_atfa_callback.Release()
-    self.wait_atfa_callback = None
 
   def ChangeLanguage(self, language_text):
     """Change the language setting according to the selected language name.
