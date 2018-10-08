@@ -25,6 +25,7 @@ import datetime
 import json
 import math
 import os
+import sets
 import sys
 import threading
 import time
@@ -435,6 +436,7 @@ class AtftAudit(object):
                audit_dir,
                download_interval,
                get_file_handler,
+               handle_exception_handler,
                get_atfa_serial):
     """Initialize ATFT Audit object.
 
@@ -442,6 +444,7 @@ class AtftAudit(object):
       audit_dir: The audit file directory.
       download_interval: How often (keys) to pull audit file.
       get_file_handler: The function to get file from ATFA.
+      handle_exception_handler: The function to handle exception.
       get_atfa_serial: The function to get current ATFA serial.
     """
     self.audit_dir = audit_dir
@@ -449,6 +452,7 @@ class AtftAudit(object):
     self.download_interval = download_interval
     self.get_file_handler = get_file_handler
     self.get_atfa_serial = get_atfa_serial
+    self.handle_exception_handler = handle_exception_handler
     if not os.path.exists(self.audit_dir):
       # If audit directory does not exist, try to create it.
       try:
@@ -499,13 +503,13 @@ class AtftAudit(object):
     except DeviceNotFoundException as e:
       return False
     except FastbootFailure as e:
-      self._HandleException('E', e)
+      self.handle_exception_handler('E', e)
       return False
 
     filepath = os.path.join(
         self.audit_dir, AtftAudit.GetAuditFileName(serial))
 
-    if not self.get_file_handler(filepath, 'audit', False):
+    if not self.get_file_handler(filepath, 'audit', False, True):
       return False
 
     # We only remove old files if we successfully pull audit file.
@@ -518,6 +522,125 @@ class AtftAudit(object):
       os.remove(oldest_file)
 
     return True
+
+
+class AtftKeyHandler(object):
+  """The class to manage key file processing."""
+
+  def __init__(self,
+               key_dir,
+               log_dir,
+               key_file_extension,
+               process_key_handler,
+               handle_exception_handler,
+               get_atfa_serial):
+    """Initialize ATFT Key object.
+
+    Args:
+      key_dir: The folder to look for key files.
+      log_dir: The log directory folder to store processed key information.
+      key_file_extension: The extension for the key file.
+      process_key_handler: The handler to store the key into the ATFA.
+      handle_exception_handler: The function to handle exception.
+      get_atfa_serial: The handler to get the ATFA serial number.
+    """
+    # Check for unprocessed key files every 5 minutes.
+    self.refresh_interval = 300
+    self.key_dir = key_dir
+    self.log_dir = log_dir
+    self.key_file_extension = key_file_extension
+    self.process_key_handler = process_key_handler
+    self.handle_exception_handler = handle_exception_handler
+    self.get_atfa_serial = get_atfa_serial
+    self.timer = None
+    self.processed_keys = {}
+
+  def StartProcessKey(self):
+    """Start periodically processing keys in the key_dir."""
+    if not self.key_dir or not os.path.exists(self.key_dir):
+      return
+    for key_log_file in os.listdir(self.log_dir):
+      if not key_log_file.startswith('ATFA') or not key_log_file.endswith('.log'):
+        continue
+      atfa_id = key_log_file.replace('.log', '')
+      try:
+        with open(os.path.join(self.log_dir, key_log_file), 'r') as log_file:
+          self.processed_keys[atfa_id] = sets.Set()
+          for file_name in log_file:
+            self.processed_keys[atfa_id].add(file_name.replace('\n', ''))
+      except IOError:
+        continue
+    self.ProcessKeyFile()
+
+  def StopProcessKey(self):
+    """End the processing."""
+    if self.timer:
+      self.timer.cancel()
+    self.timer = None
+
+  def ProcessKeyFile(self):
+    """Read unprocessed key files from the key directory and process them."""
+    key_files  = []
+    atfa_id = None
+    self.timer = threading.Timer(self.refresh_interval, self.ProcessKeyFile)
+    self.timer.start()
+    try:
+      atfa_id = self.get_atfa_serial()
+    except (DeviceNotFoundException, FastbootFailure):
+      # Either ATFA does not exist or something wrong with it, ignore and
+      # try again next time.
+      return
+
+    for key_file in os.listdir(self.key_dir):
+      if not key_file.endswith(self.key_file_extension.replace("*.", "")):
+        continue
+      if not key_file.startswith(atfa_id):
+        continue
+      if (atfa_id in self.processed_keys and
+          key_file in self.processed_keys[atfa_id]):
+        continue
+      if os.path.isfile(os.path.join(self.key_dir, key_file)):
+        key_files.append(key_file)
+
+    for key_file in key_files:
+      key_path = os.path.join(self.key_dir, key_file)
+      try:
+        self.process_key_handler(key_path, True)
+        # Process succeed, record the key file name.
+        self.WriteToLog(key_file, atfa_id)
+      except DeviceNotFoundException:
+        continue
+      except FastbootFailure as e:
+        # If the process fails, this may because the key bundle file is being
+        # written to, the key bundle corrupts or other ephemeral errors that
+        # might be fixed in another try. As a result, we don't write it to
+        # log and let it automatically retry.
+        self.handle_exception_handler('E', e)
+
+  def WriteToLog(self, key_file_name, atfa_id):
+    """Record key-processed information.
+
+    Args:
+      key_file_name: The file name for the key that has been processed.
+      atfa_id: The ATFA ID this key file is for.
+    """
+    if atfa_id not in self.processed_keys:
+      self.processed_keys[atfa_id] = sets.Set()
+    self.processed_keys[atfa_id].add(key_file_name)
+
+    key_log_file = os.path.join(self.log_dir, '{}.log'.format(atfa_id))
+    if not os.path.exists(key_log_file):
+      try:
+        log_file = open(key_log_file, 'w+')
+        log_file.close()
+      except IOError:
+        return
+    try:
+      with open(key_log_file, 'a+') as log_file:
+        log_file.write(key_file_name + '\n')
+        log_file.flush()
+    except IOError:
+      return
 
 
 class AtftLog(object):
@@ -1355,6 +1478,9 @@ class Atft(wx.Frame):
 
     self.audit = self.CreateAtftAudit()
 
+    self.key_handler = self.CreateAtftKeyHandler()
+    self.key_handler.StartProcessKey()
+
     if self.configs == None:
       self.ShowAlert(self.atft_string.ALERT_FAIL_TO_PARSE_CONFIG)
       sys.exit(0)
@@ -1560,7 +1686,16 @@ class Atft(wx.Frame):
     return AtftAudit(self.audit_dir,
                      self.audit_interval,
                      self._GetFileFromATFA,
+                     self._HandleException,
                      self.atft_manager.GetATFASerial)
+
+  def CreateAtftKeyHandler(self):
+    return AtftKeyHandler(self.key_dir,
+                   self.log_dir,
+                   self.key_file_extension,
+                   self._ProcessKey,
+                   self._HandleException,
+                   self.atft_manager.GetATFASerial)
 
   def ParseConfigFile(self):
     """Parse the configuration file and read in the necessary configurations.
@@ -1586,6 +1721,7 @@ class Atft(wx.Frame):
     self.product_attribute_file_extension = '*.atpa'
     self.key_file_extension = '*.atfa'
     self.update_file_extension = '*.upd'
+    self.key_dir = None
 
     # The list to store the device location for each target device slot. If the
     # slot is not mapped, it will be None.
@@ -1631,6 +1767,8 @@ class Atft(wx.Frame):
         self.provision_steps = configs['PROVISION_STEPS']
       if 'AUDIT_INTERVAL' in configs:
         self.audit_interval = int(configs['AUDIT_INTERVAL'])
+      if 'KEY_DIR' in configs:
+        self.key_dir = configs['KEY_DIR']
     except (KeyError, ValueError):
       return None
 
@@ -2809,6 +2947,8 @@ class Atft(wx.Frame):
     self._StoreConfigToFile()
     # Stop the refresh timer on close.
     self.StopRefresh()
+    # Stop automatic processing keys.
+    self.key_handler.StopProcessKey()
     self.Destroy()
 
   def _is_provision_steps_finished(self, provision_state):
@@ -3130,11 +3270,31 @@ class Atft(wx.Frame):
     evt = Event(self.print_event, wx.ID_ANY, msg)
     wx.QueueEvent(self, evt)
 
-  def _StartOperation(self, operation, target, show_alert=True):
+  def _StartOperation(self, operation, target, show_alert=True, blocking=False):
+    """Set the target to operating status, print out the start message.
+
+    This methods prevent two operations on the same device interleaving with
+    each other. If blocking is False, then this function would return False
+    if there is another interleaving operation running. Otherwise, this call
+    would block until the other operation finishes. This function would then
+    obtain the operation lock the target device. This function would also
+    pause the 'fastboot devices' refresh because that would interfere with any
+    other operations.
+
+    Args:
+      operation: The operation to start.
+      target: The target device.
+      show_alert: Whether to print alert message if another operation is
+        ongoing.
+      blocking: Whether to wait for the other operation.
+    Returns:
+      False if blocking is set to False and another operation is ongoing,
+      otherwise return True.
+    """
     if not target:
       self.PauseRefresh()
       return True
-    if target.operation_lock.acquire(False):
+    if target.operation_lock.acquire(blocking):
       target.operation = operation
       self._SendOperationStartEvent(operation, target)
       self.PauseRefresh()
@@ -3148,6 +3308,11 @@ class Atft(wx.Frame):
     return False
 
   def _EndOperation(self, target):
+    """Clear the operation status and release the operation lock.
+
+    Args:
+      target: The target device.
+    """
     self.ResumeRefresh()
     if not target:
       return
@@ -3564,7 +3729,7 @@ class Atft(wx.Frame):
     """
     operation = 'Fuse bootloader verified boot key'
     serial = target.serial_number
-    if not self._StartOperation(operation, target):
+    if not self._StartOperation(operation, target, True, auto_prov):
       return
 
     try:
@@ -3677,14 +3842,15 @@ class Atft(wx.Frame):
     for target in pending_targets:
       self._FusePermAttrTarget(target)
 
-  def _FusePermAttrTarget(self, target):
+  def _FusePermAttrTarget(self, target, auto_prov=False):
     """Fuse the permanent attributes to the specific target device.
 
     Args:
       target: The target device DeviceInfo object.
+      auto_prov: Whether this operation is part of automatic operations.
     """
     operation = 'Fuse permanent attributes'
-    if not self._StartOperation(operation, target):
+    if not self._StartOperation(operation, target, True, auto_prov):
       return
 
     try:
@@ -3725,14 +3891,15 @@ class Atft(wx.Frame):
     for target in pending_targets:
       self._LockAvbTarget(target)
 
-  def _LockAvbTarget(self, target):
+  def _LockAvbTarget(self, target, auto_prov=False):
     """Lock android verified boot for the specific target device.
 
     Args:
       target: The target device DeviceInfo object.
+      auto_prov: Whether this operation is part of automatic operations.
     """
     operation = 'Lock android verified boot'
-    if not self._StartOperation(operation, target):
+    if not self._StartOperation(operation, target, True, auto_prov):
       return
 
     try:
@@ -3765,14 +3932,15 @@ class Atft(wx.Frame):
     for target in pending_targets:
       self._UnlockAvbTarget(target)
 
-  def _UnlockAvbTarget(self, target):
+  def _UnlockAvbTarget(self, target, auto_prov=False):
     """Unlock android verified boot for the specific target device.
 
     Args:
       target: The target device DeviceInfo object.
+      auto_prov: Whether this operation is part of automatic operations.
     """
     operation = 'Unlock android verified boot'
-    if not self._StartOperation(operation, target):
+    if not self._StartOperation(operation, target, True, auto_prov):
       return
 
     try:
@@ -3873,18 +4041,22 @@ class Atft(wx.Frame):
       if target_dev.provision_status == ProvisionStatus.WAITING:
         self._ProvisionTarget(target_dev, is_som_key)
 
-  def _ProvisionTarget(self, target, is_som_key):
+  def _ProvisionTarget(self, target, is_som_key, auto_prov=False):
     """Provision the attestation key into the specific target.
 
     Args:
       target: The target to be provisioned.
       is_som_key: Whether provision som key (or product key).
+      auto_prov: Whether this operation is part of automatic operations.
     """
     operation = 'Product Attestation Key Provisioning'
     if is_som_key:
       operation = 'SoM Attestation Key Provisioning'
-    if not self._StartOperation(operation, target):
+    atfa_dev = self.atft_manager.GetATFADevice()
+    if not self._StartOperation(operation, target, True, auto_prov):
       return
+    if not self._StartOperation(operation, atfa_dev, True, auto_prov):
+     return
 
     try:
       self.atft_manager.Provision(target, is_som_key)
@@ -3898,6 +4070,7 @@ class Atft(wx.Frame):
       self._UpdateKeysLeftInATFA()
       return
     finally:
+      self._EndOperation(atfa_dev)
       self._EndOperation(target)
 
     self._SendOperationSucceedEvent(operation, target)
@@ -3937,18 +4110,18 @@ class Atft(wx.Frame):
         continue
       elif (not target.provision_state.avb_perm_attr_set and
             operation == 'FusePermAttr'):
-        self._FusePermAttrTarget(target)
+        self._FusePermAttrTarget(target, True)
         continue
       elif (not target.provision_state.avb_locked and operation == 'LockAvb'):
-        self._LockAvbTarget(target)
+        self._LockAvbTarget(target, True)
         continue
       elif (target.provision_state.avb_locked and operation == 'UnlockAvb'):
-        self._UnlockAvbTarget(target)
+        self._UnlockAvbTarget(target, True)
         continue
       elif (not target.provision_state.product_provisioned and
             operation == 'ProvisionProduct'):
         # Provision product key.
-        self._ProvisionTarget(target, False)
+        self._ProvisionTarget(target, False, True)
         if self._GetCachedATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.atft_string.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
@@ -3957,7 +4130,7 @@ class Atft(wx.Frame):
       elif (not target.provision_state.som_provisioned and
             operation == 'ProvisionSom'):
         # Provision som key.
-        self._ProvisionTarget(target, True)
+        self._ProvisionTarget(target, True, True)
         if self._GetCachedATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.atft_string.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
@@ -3972,29 +4145,43 @@ class Atft(wx.Frame):
   def _ProcessKeyCallback(self, pathname):
     self._CreateThread(self._ProcessKey, pathname)
 
-  def _ProcessKey(self, pathname):
+  def _ProcessKey(self, pathname, auto_process=False):
     """Ask ATFA device to store and process the stored keybundle.
 
     Args:
       pathname: The path name to the key bundle file.
+      auto_process: Whether this operation is automatic.
     """
     operation = 'ATFA device store and process key bundle'
     atfa_dev = self.atft_manager.GetATFADevice()
-    if not self._StartOperation(operation, atfa_dev):
+    show_alert = True
+    blocking = False
+    if auto_process:
+      show_alert = False
+      blocking = True
+    if not self._StartOperation(operation, atfa_dev, show_alert, blocking):
       return
     try:
+      self.atft_manager.CheckDevice(atfa_dev)
       atfa_dev.Download(pathname)
       self.atft_manager.ProcessATFAKey()
       self._SendOperationSucceedEvent(operation)
 
     except DeviceNotFoundException as e:
+      if auto_process:
+        raise e
+        return
       e.SetMsg('No Available ATFA!')
       self._HandleException('W', e, operation)
       return
     except FastbootFailure as e:
+      if auto_process:
+        raise e
+        return
       self._HandleException('E', e, operation)
-      self._SendAlertEvent(
-          self.atft_string.ALERT_PROCESS_KEY_FAILURE + e.msg.encode('utf-8'))
+      if show_alert:
+        self._SendAlertEvent(
+            self.atft_string.ALERT_PROCESS_KEY_FAILURE + e.msg.encode('utf-8'))
       return
     finally:
       self._EndOperation(atfa_dev)
@@ -4063,12 +4250,12 @@ class Atft(wx.Frame):
       self._EndOperation(atfa_dev)
 
   def _GetRegFile(self, filepath):
-    self._CreateThread(self._GetFileFromATFA, filepath, 'reg', True)
+    self._CreateThread(self._GetFileFromATFA, filepath, 'reg', True, False)
 
-  def _GetAuditFile(self, filepath, show_alert=True):
-    self._CreateThread(self._GetFileFromATFA, filepath, 'audit', show_alert)
+  def _GetAuditFile(self, filepath):
+    self._CreateThread(self._GetFileFromATFA, filepath, 'audit', True, False)
 
-  def _GetFileFromATFA(self, filepath, file_type, show_alert):
+  def _GetFileFromATFA(self, filepath, file_type, show_alert, blocking):
     """Download a type of file from the ATFA device.
 
     Args:
@@ -4076,6 +4263,7 @@ class Atft(wx.Frame):
       file_type: The type of the file to be downloaded. Supported options are
         'reg'/'audit'.
       show_alert: Whether to display an alert if error happens.
+      blocking: Whether to block the operation on other pending operations.
     Returns:
       Whether this operation succeed.
     """
@@ -4090,7 +4278,7 @@ class Atft(wx.Frame):
       # Should not reach here.
       return False
     operation = 'ATFA device prepare and download ' + file_type + ' file'
-    if not self._StartOperation(operation, atfa_dev, show_alert):
+    if not self._StartOperation(operation, atfa_dev, show_alert, blocking):
       return False
     try:
       filepath = filepath.encode('utf-8')

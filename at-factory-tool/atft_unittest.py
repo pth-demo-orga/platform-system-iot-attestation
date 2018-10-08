@@ -25,6 +25,7 @@ from mock import MagicMock
 from mock import patch
 from mock import mock_open
 import os
+import sets
 import wx
 
 
@@ -51,6 +52,7 @@ class MockAtft(atft.Atft):
     self.CreateAtftManager = MagicMock()
     self.CreateAtftLog = MagicMock()
     self.CreateAtftAudit = MagicMock()
+    self.CreateAtftKeyHandler = MagicMock()
     self.CreateShortCuts = MagicMock()
     self.ParseConfigFile = self._MockParseConfig
     self._SendPrintEvent = MagicMock()
@@ -74,6 +76,7 @@ class MockAtft(atft.Atft):
     self.language = 'ENG'
     self.reboot_timeout = 1.0
     self.product_attribute_file_extension = '*.atpa'
+    self.key_dir = 'test_key_dir'
 
     return {}
 
@@ -116,6 +119,7 @@ class AtftTest(unittest.TestCase):
   TEST_TEXT = 'test-text'
   TEST_TEXT2 = 'test-text2'
   LOG_DIR = 'test-dir'
+  KEY_DIR = 'test-key'
   AUDIT_DIR = 'test-audit'
   TEST_TIME = '0000-00-00 00:00:00'
   TEST_TIMESTAMP = 1000
@@ -576,15 +580,16 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+        state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -607,15 +612,16 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+        state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1, self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -635,19 +641,20 @@ class AtftTest(unittest.TestCase):
     mock_atft._FuseVbootKeyTarget = MagicMock()
     mock_atft._FuseVbootKeyTarget.side_effect = (
         lambda target, auto_prov, state=ProvisionStatus.FUSEVBOOT_FAILED:
-            self.MockStateChange(target, state))
+        self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
-            self.MockStateChange(target, state))
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
-            self.MockStateChange(target, state))
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
-            self.MockStateChange(target, state))
+        lambda target, is_som_key, auto_prov,
+        state=ProvisionStatus.PROVISION_SUCCESS:
+        self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
     mock_atft.atft_manager = MagicMock()
@@ -669,16 +676,17 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
-            self.MockStateChange(target, state))
+        lambda target, is_som_key, auto_prov,
+        state=ProvisionStatus.PROVISION_SUCCESS:
+        self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
     mock_atft.atft_manager = MagicMock()
@@ -710,15 +718,16 @@ class AtftTest(unittest.TestCase):
     mock_atft._FuseVbootKeyTarget.side_effect = self.mockDeviceRebootTimeout
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+            state=ProvisionStatus.PROVISION_SUCCESS:
             self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -757,15 +766,16 @@ class AtftTest(unittest.TestCase):
     mock_atft._FuseVbootKeyTarget.side_effect = self.mockDeviceFuseVbootFailed
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+            state=ProvisionStatus.PROVISION_SUCCESS:
             self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -799,15 +809,16 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_FAILED:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_FAILED:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+            state=ProvisionStatus.PROVISION_SUCCESS:
             self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -830,15 +841,16 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_FAILED:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_FAILED:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+            state=ProvisionStatus.PROVISION_SUCCESS:
             self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -860,15 +872,16 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_FAILED:
+        lambda target, is_som_key, auto_prov,
+            state=ProvisionStatus.PROVISION_FAILED:
             self.MockStateChange(target, state))
     mock_atft.auto_dev_serials = [self.TEST_SERIAL1]
     mock_atft.auto_prov = True
@@ -891,15 +904,16 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+            state=ProvisionStatus.PROVISION_SUCCESS:
             self.MockStateChange(target, state))
 
     # The device has bootloader_locked and avb_locked set. Should fuse perm attr
@@ -937,19 +951,20 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+        state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._UnlockAvbTarget = MagicMock()
     mock_atft._UnlockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.UNLOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.UNLOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
 
     mock_atft.provision_steps = ['FuseVbootKey', 'FusePermAttr', 'LockAvb',
@@ -984,19 +999,20 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+        state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._UnlockAvbTarget = MagicMock()
     mock_atft._UnlockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.UNLOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.UNLOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
 
     mock_atft.provision_steps = ['FuseVbootKey', 'FusePermAttr', 'LockAvb',
@@ -1031,15 +1047,16 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+        state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
 
     mock_atft.provision_steps = ['FusePermAttr', 'FuseVbootKey', 'ProvisionProduct',
@@ -1077,15 +1094,16 @@ class AtftTest(unittest.TestCase):
         self.MockStateChange(target, state))
     mock_atft._FusePermAttrTarget = MagicMock()
     mock_atft._FusePermAttrTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.FUSEATTR_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.FUSEATTR_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._ProvisionTarget = MagicMock()
     mock_atft._ProvisionTarget.side_effect = (
-        lambda target, is_som_key, state=ProvisionStatus.PROVISION_SUCCESS:
+        lambda target, is_som_key, auto_prov,
+        state=ProvisionStatus.PROVISION_SUCCESS:
         self.MockStateChange(target, state))
     mock_atft._LockAvbTarget = MagicMock()
     mock_atft._LockAvbTarget.side_effect = (
-        lambda target=mock_atft, state=ProvisionStatus.LOCKAVB_SUCCESS:
+        lambda target, auto_prov, state=ProvisionStatus.LOCKAVB_SUCCESS:
         self.MockStateChange(target, state))
 
     mock_atft.provision_steps = ['FusePermAttr', 'FuseVbootKey', 'LockAvb']
@@ -2540,7 +2558,7 @@ class AtftTest(unittest.TestCase):
     self.mock_time += 1
     return str(self.mock_time - 1)
 
-  def CreateAuditFiles(self, file_path, file_type, show_alert):
+  def CreateAuditFiles(self, file_path, file_type, show_alert, blocking):
     self.mock_audit_files.append(os.path.basename(file_path))
     return True
 
@@ -2565,6 +2583,7 @@ class AtftTest(unittest.TestCase):
     mock_datetime.utcnow.return_value = mock_time
     mock_time.strftime.side_effect = self.IncreaseMockTime
     mock_isfile.return_value = True
+    handle_exception_handler = MagicMock()
 
     audit_file_path_0 = os.path.join(
         self.AUDIT_DIR, self.TEST_SERIAL1 + '_0.audit')
@@ -2583,29 +2602,34 @@ class AtftTest(unittest.TestCase):
         self.AUDIT_DIR,
         download_interval,
         get_file_handler,
+        handle_exception_handler,
         get_atfa_serial)
     mock_makedir.assert_called_with(self.AUDIT_DIR)
     test_audit.PullAudit(10)
-    get_file_handler.assert_called_once_with(audit_file_path_0, 'audit', False)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_0, 'audit', False, True)
     mock_remove.assert_not_called()
     get_file_handler.reset_mock()
     test_audit.PullAudit(9)
     get_file_handler.assert_not_called()
     test_audit.PullAudit(8)
-    get_file_handler.assert_called_once_with(audit_file_path_1, 'audit', False)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_1, 'audit', False, True)
     mock_remove.assert_called_once_with(audit_file_path_0)
     mock_remove.reset_mock()
     get_file_handler.reset_mock()
     test_audit.PullAudit(7)
     get_file_handler.assert_not_called()
     test_audit.PullAudit(6)
-    get_file_handler.assert_called_once_with(audit_file_path_2, 'audit', False)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_2, 'audit', False, True)
     get_file_handler.reset_mock()
     mock_remove.assert_called_once_with(audit_file_path_1)
     mock_remove.reset_mock()
     test_audit.ResetKeysLeft()
     test_audit.PullAudit(10)
-    get_file_handler.assert_called_once_with(audit_file_path_3, 'audit', False)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_3, 'audit', False, True)
     mock_remove.assert_called_once_with(audit_file_path_2)
 
   @patch('os.mkdir')
@@ -2626,6 +2650,7 @@ class AtftTest(unittest.TestCase):
     mock_datetime.utcnow.return_value = mock_time
     mock_time.strftime.side_effect = self.IncreaseMockTime
     mock_isfile.return_value = True
+    handle_exception_handler = MagicMock()
 
     audit_file_path_0 = os.path.join(
         self.AUDIT_DIR, self.TEST_SERIAL1 + '_0.audit')
@@ -2648,9 +2673,11 @@ class AtftTest(unittest.TestCase):
         self.AUDIT_DIR,
         download_interval,
         get_file_handler,
+        handle_exception_handler,
         get_atfa_serial)
     test_audit.PullAudit(10)
-    get_file_handler.assert_called_once_with(audit_file_path_3, 'audit', False)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_3, 'audit', False, True)
     mock_remove.assert_has_calls([
         call(audit_file_path_0),
         call(audit_file_path_1),
@@ -2673,6 +2700,7 @@ class AtftTest(unittest.TestCase):
     mock_datetime.utcnow.return_value = mock_time
     mock_time.strftime.side_effect = self.IncreaseMockTime
     mock_isfile.return_value = True
+    handle_exception_handler = MagicMock()
 
     # If get file fails, must not remove file.
     get_file_handler.return_value = False
@@ -2697,9 +2725,11 @@ class AtftTest(unittest.TestCase):
         self.AUDIT_DIR,
         download_interval,
         get_file_handler,
+        handle_exception_handler,
         get_atfa_serial)
     test_audit.PullAudit(10)
-    get_file_handler.assert_called_once_with(audit_file_path_3, 'audit', False)
+    get_file_handler.assert_called_once_with(
+        audit_file_path_3, 'audit', False, True)
     mock_remove.assert_not_called()
 
   @patch('os.mkdir')
@@ -2720,6 +2750,7 @@ class AtftTest(unittest.TestCase):
     mock_datetime.utcnow.return_value = mock_time
     mock_time.strftime.side_effect = self.IncreaseMockTime
     mock_isfile.return_value = True
+    handle_exception_handler = MagicMock()
 
     audit_file_path_1_0 = os.path.join(
         self.AUDIT_DIR, self.TEST_SERIAL1 + '_0.audit')
@@ -2738,10 +2769,11 @@ class AtftTest(unittest.TestCase):
         self.AUDIT_DIR,
         download_interval,
         get_file_handler,
+        handle_exception_handler,
         get_atfa_serial)
     test_audit.PullAudit(10)
     get_file_handler.assert_called_once_with(
-        audit_file_path_1_0, 'audit', False)
+        audit_file_path_1_0, 'audit', False, True)
     mock_remove.assert_not_called()
     get_file_handler.reset_mock()
 
@@ -2750,7 +2782,7 @@ class AtftTest(unittest.TestCase):
     get_atfa_serial.return_value = self.TEST_SERIAL2
     test_audit.PullAudit(10)
     get_file_handler.assert_called_once_with(
-        audit_file_path_2_1, 'audit', False)
+        audit_file_path_2_1, 'audit', False, True)
     mock_remove.assert_not_called()
     get_file_handler.reset_mock()
 
@@ -2759,7 +2791,7 @@ class AtftTest(unittest.TestCase):
     get_atfa_serial.return_value = self.TEST_SERIAL1
     test_audit.PullAudit(9)
     get_file_handler.assert_called_once_with(
-        audit_file_path_1_2, 'audit', False)
+        audit_file_path_1_2, 'audit', False, True)
     mock_remove.assert_called_once_with(audit_file_path_1_0)
     mock_remove.reset_mock()
     get_file_handler.reset_mock()
@@ -2769,10 +2801,44 @@ class AtftTest(unittest.TestCase):
     get_atfa_serial.return_value = self.TEST_SERIAL2
     test_audit.PullAudit(9)
     get_file_handler.assert_called_once_with(
-        audit_file_path_2_3, 'audit', False)
+        audit_file_path_2_3, 'audit', False, True)
     mock_remove.assert_called_once_with(audit_file_path_2_1)
     mock_remove.reset_mock()
     get_file_handler.reset_mock()
+
+  @patch('os.mkdir')
+  @patch('datetime.datetime')
+  @patch('os.path.isfile')
+  @patch('os.remove')
+  @patch('os.listdir')
+  def testAtftAuditFastbootFailure(
+      self, mock_listdir, mock_remove, mock_isfile, mock_datetime,
+      mock_makedir):
+    download_interval = 2
+    get_file_handler = MagicMock()
+    get_file_handler.side_effect = self.CreateAuditFiles
+    get_atfa_serial = MagicMock()
+    get_atfa_serial.side_effect = fastboot_exceptions.FastbootFailure('')
+    mock_remove.side_effect = self.RemoveAuditFiles
+    mock_time = MagicMock()
+    mock_datetime.utcnow.return_value = mock_time
+    mock_time.strftime.side_effect = self.IncreaseMockTime
+    mock_isfile.return_value = True
+    handle_exception_handler = MagicMock()
+
+    self.mock_audit_files = []
+    self.mock_time = 0
+    mock_listdir.return_value = self.mock_audit_files
+
+    test_audit = atft.AtftAudit(
+        self.AUDIT_DIR,
+        download_interval,
+        get_file_handler,
+        handle_exception_handler,
+        get_atfa_serial)
+    test_audit.PullAudit(10)
+    get_file_handler.assert_not_called()
+    handle_exception_handler.assert_called_once()
 
   def testAutoMapUSBLocationToSlot(self):
     mock_atft = MockAtft()
@@ -2986,6 +3052,71 @@ class AtftTest(unittest.TestCase):
     mock_atft.ManualMapUSBLocationToSlot(MagicMock())
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft.SendUpdateMappingEvent.assert_not_called()
+
+  @patch('os.mkdir')
+  @patch('os.path.exists')
+  @patch('os.path.isfile')
+  @patch('os.listdir')
+  @patch('threading.Timer')
+  @patch('__builtin__.open')
+  def testProcessKeyFileAutomatically(self,
+                                      mock_create_timer,
+                                      mock_open,
+                                      mock_listdir,
+                                      mock_isfile,
+                                      mock_exists,
+                                      mock_mkdir):
+    key_extension = '*.atfa'
+    key1 = self.TEST_TEXT + '_1.atfa'
+    key2 = self.TEST_TEXT + '_2.atfa'
+    process_key_handler = MagicMock()
+    handle_exception_handler = MagicMock()
+    get_atfa_serial = MagicMock()
+    mock_isfile.return_value = True
+    mock_exists.return_value = True
+    atft_key_handler = atft.AtftKeyHandler(self.KEY_DIR,
+                   self.LOG_DIR,
+                   key_extension,
+                   process_key_handler,
+                   handle_exception_handler,
+                   get_atfa_serial)
+    atft_key_handler.processed_keys = {}
+    atft_key_handler.key_dir = self.KEY_DIR
+    mock_listdir.return_value = [key1]
+    get_atfa_serial.return_value = self.TEST_TEXT
+    atft_key_handler.ProcessKeyFile()
+    process_key_handler.assert_called_once_with(
+        os.path.join(self.KEY_DIR, key1), True)
+    mock_create_timer.assert_called_once()
+    mock_open.assert_called_once()
+    self.assertEqual(1, len(atft_key_handler.processed_keys[self.TEST_TEXT]))
+    self.assertEqual(True,
+                     key1 in atft_key_handler.processed_keys[self.TEST_TEXT])
+
+    # If the error is DeviceNotFound, than don't record it to processed keys.
+    mock_listdir.return_value = [key2]
+    process_key_handler.reset_mock()
+    process_key_handler.side_effect = (
+        fastboot_exceptions.DeviceNotFoundException)
+    mock_listdir.return_value = [key2]
+    atft_key_handler.ProcessKeyFile()
+    process_key_handler.assert_called_once()
+    self.assertEqual(1, len(atft_key_handler.processed_keys[self.TEST_TEXT]))
+    self.assertEqual(False,
+                     key2 in atft_key_handler.processed_keys[self.TEST_TEXT])
+
+    # If the error is FastbootFailure, do not add it to processed keys.
+    mock_listdir.return_value = [key2]
+    process_key_handler.reset_mock()
+    process_key_handler.side_effect = (
+        fastboot_exceptions.FastbootFailure(''))
+    mock_listdir.return_value = [key2]
+    atft_key_handler.ProcessKeyFile()
+    process_key_handler.assert_called_once()
+    self.assertEqual(1, len(atft_key_handler.processed_keys[self.TEST_TEXT]))
+    self.assertEqual(False,
+                     key2 in atft_key_handler.processed_keys[self.TEST_TEXT])
+    handle_exception_handler.assert_called_once()
 
 
 if __name__ == '__main__':
