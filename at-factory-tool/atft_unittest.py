@@ -2960,9 +2960,8 @@ class AtftTest(TestCase):
     mock_atft.SendUpdateMappingEvent.assert_not_called()
 
   @patch('threading.Timer')
-  def testProcessKeyFileAutomatically(self,
-                                      mock_create_timer):
-    # Create fake folders.
+  def testProcessKeyFileAutomatically(self, mock_create_timer):
+    # Test automatically processing unprocessed key bundle files from KEY_DIR.
     self.fs.create_dir(self.LOG_DIR)
     self.fs.create_dir(self.KEY_DIR)
     key_extension = '*.atfa'
@@ -3072,6 +3071,44 @@ class AtftTest(TestCase):
         True, key2 in atft_key_handler.processed_keys[self.TEST_ATFA_ID2])
     self.assertEqual(
         True, key3 in atft_key_handler.processed_keys[self.TEST_ATFA_ID2])
+
+    # Clear fake fs state
+    shutil.rmtree(self.KEY_DIR)
+    shutil.rmtree(self.LOG_DIR)
+
+  @patch('threading.Timer')
+  def testProcessKeyFileAutoProcessed(self, mock_create_timer):
+    # Test marking keys as processed if the the ATFA returns a key processed
+    # error.
+    self.fs.create_dir(self.LOG_DIR)
+    self.fs.create_dir(self.KEY_DIR)
+    key_extension = '*.atfa'
+    key1 = self.TEST_ATFA_ID1 + '_1234.atfa'
+    process_key_handler = MagicMock()
+    handle_exception_handler = MagicMock()
+    get_atfa_serial = MagicMock()
+    atft_key_handler = atft.AtftKeyHandler(self.KEY_DIR,
+                                           self.LOG_DIR,
+                                           key_extension,
+                                           process_key_handler,
+                                           handle_exception_handler,
+                                           get_atfa_serial)
+
+    self.fs.create_file(os.path.join(self.KEY_DIR, key1))
+    get_atfa_serial.return_value = self.TEST_ATFA_ID1
+    atft_key_handler.key_dir = self.KEY_DIR
+    process_key_handler.side_effect = fastboot_exceptions.FastbootFailure(
+        'FAILKeybundle was previously processed')
+    atft_key_handler.StartProcessKey()
+    process_key_handler.assert_called_once_with(
+        os.path.join(self.KEY_DIR, key1), True)
+    mock_create_timer.assert_called_once()
+    self.assertEqual(
+        True, self.TEST_ATFA_ID1 in atft_key_handler.processed_keys)
+    self.assertEqual(
+        1, len(atft_key_handler.processed_keys[self.TEST_ATFA_ID1]))
+    self.assertEqual(
+        True, key1 in atft_key_handler.processed_keys[self.TEST_ATFA_ID1])
 
     # Clear fake fs state
     shutil.rmtree(self.KEY_DIR)
