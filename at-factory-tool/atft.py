@@ -81,6 +81,8 @@ MAX_AUDIT_FILE_NUMBER = 1
 LANGUAGE_OPTIONS = ['English', '简体中文']
 LANGUAGE_CONFIGS = ['eng', 'cn']
 
+KEYBUNDLE_PROCESSED_MESSAGE = 'Keybundle was previously processed'
+
 
 class AtftException(Exception):
   """The exception class to include device and operation information.
@@ -614,8 +616,11 @@ class AtftKeyHandler(object):
         # If the process fails, this may because the key bundle file is being
         # written to, the key bundle corrupts or other ephemeral errors that
         # might be fixed in another try. As a result, we don't write it to
-        # log and let it automatically retry.
+        # log and let it automatically retry unless the error is that the key
+        # is already processed.
         self.handle_exception_handler('E', e)
+        if KEYBUNDLE_PROCESSED_MESSAGE in e.msg:
+          self.WriteToLog(key_file, atfa_id)
 
   def WriteToLog(self, key_file_name, atfa_id):
     """Record key-processed information.
