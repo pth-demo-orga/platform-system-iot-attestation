@@ -150,10 +150,11 @@ class AtftTest(TestCase):
   def DeleteAllItems(self):
     self.test_target_devs = []
 
-  # Test atft._DeviceListedEventHandler
-  # Make sure if nothing changes, we would not rerender the target list.
   def testDeviceListedEventHandler(self):
+    # Test atft._DeviceListedEventHandler
+    # Make sure if nothing changes, we would not rerender the target list.
     mock_atft = MockAtft()
+    mock_atft._CheckMappingMode = MagicMock()
     mock_atft.atfa_dev_output = MagicMock()
     mock_atft.last_target_list = []
     mock_atft.target_devs_output = MagicMock()
@@ -164,6 +165,7 @@ class AtftTest(TestCase):
     mock_atft._HandleKeysLeft = MagicMock()
     mock_atft._PrintTargetDevices = MagicMock()
     mock_atft._PrintAtfaDevice = MagicMock()
+    mock_atft.app_settings_dialog = MagicMock()
     mock_atft.atft_manager.target_devs = []
     mock_atft._DeviceListedEventHandler(None)
     mock_atft.atft_manager.target_devs = [self.test_dev1]
@@ -179,6 +181,48 @@ class AtftTest(TestCase):
     mock_atft.atft_manager.target_devs = [self.test_dev2]
     mock_atft._DeviceListedEventHandler(None)
     mock_atft._PrintTargetDevices.assert_called_once()
+
+  def testDeviceListedEventCheckMappingMode(self):
+    # Test whether to check device mapping mode.
+    mock_atft = MockAtft()
+    mock_atft._CheckMappingMode = MagicMock()
+    mock_atft.atfa_dev_output = MagicMock()
+    mock_atft.last_target_list = []
+    mock_atft.target_devs_output = MagicMock()
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.GetATFADevice = MagicMock()
+    mock_atft.atft_manager.GetATFADevice.return_value = None
+    mock_atft.PrintToWindow = MagicMock()
+    mock_atft._HandleKeysLeft = MagicMock()
+    mock_atft._PrintTargetDevices = MagicMock()
+    mock_atft._PrintAtfaDevice = MagicMock()
+    mock_atft.app_settings_dialog = MagicMock()
+    mock_atft.atft_manager.target_devs = []
+    # Start screen not shown, in supervisor mode, settings not shown.
+    mock_atft.start_screen_shown = False
+    mock_atft.sup_mode = True
+    mock_atft.app_settings_dialog.IsShown.return_value = False
+    mock_atft._DeviceListedEventHandler(None)
+    mock_atft._CheckMappingMode.assert_called_once()
+    mock_atft._CheckMappingMode.reset_mock()
+    # Start screen shown, in supervisor mode, settings not shown.
+    mock_atft.start_screen_shown = True
+    mock_atft.sup_mode = True
+    mock_atft.app_settings_dialog.IsShown.return_value = False
+    mock_atft._DeviceListedEventHandler(None)
+    mock_atft._CheckMappingMode.assert_not_called()
+     # Start screen not shown, in operator mode, settings not shown.
+    mock_atft.start_screen_shown = False
+    mock_atft.sup_mode = False
+    mock_atft.app_settings_dialog.IsShown.return_value = False
+    mock_atft._DeviceListedEventHandler(None)
+    mock_atft._CheckMappingMode.assert_not_called()
+     # Start screen not shown, in supervisor mode, settings shown.
+    mock_atft.start_screen_shown = False
+    mock_atft.sup_mode = True
+    mock_atft.app_settings_dialog.IsShown.return_value = True
+    mock_atft._DeviceListedEventHandler(None)
+    mock_atft._CheckMappingMode.assert_not_called()
 
   def testPrintTargetDevicesMultipleDeviceMode(self):
       # Test _PrintTargetDevices in multiple device mode.
@@ -2288,7 +2332,7 @@ class AtftTest(TestCase):
     test_password_dialog.menu_set_password = MagicMock()
     test_password_dialog.button_save = MagicMock()
     test_password_dialog.button_map = MagicMock()
-    test_password_dialog.button_automap = MagicMock()
+    test_password_dialog.button_unmap = MagicMock()
     test_password_dialog.buttons_sizer = MagicMock()
     old_password = self.TEST_PASSWORD1
     new_password = self.TEST_PASSWORD2
@@ -2324,7 +2368,7 @@ class AtftTest(TestCase):
     test_password_dialog.menu_set_password = MagicMock()
     test_password_dialog.button_save = MagicMock()
     test_password_dialog.button_map = MagicMock()
-    test_password_dialog.button_automap = MagicMock()
+    test_password_dialog.button_unmap = MagicMock()
     test_password_dialog.buttons_sizer = MagicMock()
     old_password = self.TEST_PASSWORD1
     new_password = self.TEST_PASSWORD2
@@ -2812,95 +2856,6 @@ class AtftTest(TestCase):
     # Clear state
     shutil.rmtree(self.AUDIT_DIR)
 
-  def testAutoMapUSBLocationToSlot(self):
-    mock_atft = MockAtft()
-    mock_atft.device_usb_locations = []
-    for i in range(mock_atft.TARGET_DEV_SIZE):
-      mock_atft.device_usb_locations.append(None)
-    mock_atft.atft_manager = MagicMock()
-    mock_atft.SendUpdateMappingEvent = MagicMock()
-    mock_atft._SendAlertEvent = MagicMock()
-    mock_atft.ShowWarning = MagicMock()
-    mock_device_1 = MagicMock()
-    mock_device_1.location = self.TEST_LOCATION1
-    mock_device_2 = MagicMock()
-    mock_device_2.location = self.TEST_LOCATION2
-
-    # Normal case: two target devices. No initial state.
-    mock_atft.atft_manager.target_devs = [mock_device_1, mock_device_2]
-    mock_atft.AutoMapUSBLocationToSlot(MagicMock())
-    mock_atft.ShowWarning.assert_not_called()
-    mock_atft._SendAlertEvent.assert_not_called()
-    mock_atft.SendUpdateMappingEvent.assert_called_once()
-    for i in range(mock_atft.TARGET_DEV_SIZE):
-      if i == 0:
-        self.assertEqual(self.TEST_LOCATION1, mock_atft.device_usb_locations[i])
-      elif i == 1:
-        self.assertEqual(self.TEST_LOCATION2, mock_atft.device_usb_locations[i])
-      else:
-        self.assertEqual(None, mock_atft.device_usb_locations[i])
-
-    # Remap the target devices. Should show a warning about overwriting the
-    # previous configure.
-    mock_atft.SendUpdateMappingEvent.reset_mock()
-    mock_atft.atft_manager.target_devs = [mock_device_2, mock_device_1]
-    mock_atft.ShowWarning.return_value = True
-    mock_atft.AutoMapUSBLocationToSlot(MagicMock())
-    mock_atft._SendAlertEvent.assert_not_called()
-    mock_atft.ShowWarning.assert_called_once()
-    mock_atft.SendUpdateMappingEvent.assert_called_once()
-    for i in range(mock_atft.TARGET_DEV_SIZE):
-      if i == 0:
-        self.assertEqual(self.TEST_LOCATION2, mock_atft.device_usb_locations[i])
-      elif i == 1:
-        self.assertEqual(self.TEST_LOCATION1, mock_atft.device_usb_locations[i])
-      else:
-        self.assertEqual(None, mock_atft.device_usb_locations[i])
-
-    # Remove one target device, remap.
-    mock_atft.SendUpdateMappingEvent.reset_mock()
-    mock_atft.ShowWarning.reset_mock()
-    mock_atft.atft_manager.target_devs = [mock_device_1]
-    mock_atft.AutoMapUSBLocationToSlot(MagicMock())
-    mock_atft._SendAlertEvent.assert_not_called()
-    mock_atft.ShowWarning.assert_called_once()
-    mock_atft.SendUpdateMappingEvent.assert_called_once()
-    for i in range(mock_atft.TARGET_DEV_SIZE):
-      if i == 0:
-        self.assertEqual(self.TEST_LOCATION1, mock_atft.device_usb_locations[i])
-      else:
-        self.assertEqual(None, mock_atft.device_usb_locations[i])
-
-    # Remap, however, user click no for remapping.
-    mock_atft.SendUpdateMappingEvent.reset_mock()
-    mock_atft.ShowWarning.reset_mock()
-    mock_atft.ShowWarning.return_value = False
-    mock_atft.atft_manager.target_devs = [mock_device_1, mock_device_2]
-    mock_atft.AutoMapUSBLocationToSlot(MagicMock())
-    mock_atft._SendAlertEvent.assert_not_called()
-    mock_atft.ShowWarning.assert_called_once()
-    mock_atft.SendUpdateMappingEvent.assert_not_called()
-    for i in range(mock_atft.TARGET_DEV_SIZE):
-      if i == 0:
-        self.assertEqual(self.TEST_LOCATION1, mock_atft.device_usb_locations[i])
-      else:
-        self.assertEqual(None, mock_atft.device_usb_locations[i])
-
-    # Remap, however, no target device.
-    mock_atft.SendUpdateMappingEvent.reset_mock()
-    mock_atft.ShowWarning.reset_mock()
-    mock_atft.ShowWarning.return_value = True
-    mock_atft.atft_manager.target_devs = []
-    mock_atft.AutoMapUSBLocationToSlot(MagicMock())
-    mock_atft._SendAlertEvent.assert_called()
-    mock_atft.ShowWarning.assert_called_once()
-    mock_atft.SendUpdateMappingEvent.assert_not_called()
-    for i in range(mock_atft.TARGET_DEV_SIZE):
-      if i == 0:
-        self.assertEqual(self.TEST_LOCATION1, mock_atft.device_usb_locations[i])
-      else:
-        self.assertEqual(None, mock_atft.device_usb_locations[i])
-
   def testManualMapUSBLocationToSlot(self):
     mock_atft = MockAtft()
     mock_atft.device_usb_locations = []
@@ -3024,6 +2979,63 @@ class AtftTest(TestCase):
     mock_atft.ManualMapUSBLocationToSlot(MagicMock())
     mock_atft._SendAlertEvent.assert_called_once()
     mock_atft.SendUpdateMappingEvent.assert_not_called()
+
+  def testUnmapUSBLocationToSlot(self):
+    # Test atft.UnmapUSBLocationToSlot
+    mock_atft = MockAtft()
+    mock_atft.device_usb_locations = []
+    for i in range(mock_atft.TARGET_DEV_SIZE):
+      mock_atft.device_usb_locations.append(None)
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.SendUpdateMappingEvent = MagicMock()
+    mock_atft._SendAlertEvent = MagicMock()
+    mock_atft.ShowWarning = MagicMock()
+    mock_atft.app_settings_dialog = MagicMock()
+    mock_device_1 = MagicMock()
+    mock_device_1.location = self.TEST_LOCATION1
+    mock_device_2 = MagicMock()
+    mock_device_2.location = self.TEST_LOCATION2
+
+    # Test no slot selected.
+    mock_atft.app_settings_dialog.dev_mapping_components = []
+    mock_atft.UnmapUSBLocationToSlot(MagicMock())
+    # Should send an alert.
+    mock_atft._SendAlertEvent.assert_called_once()
+    mock_atft._SendAlertEvent.reset_mock()
+
+    # Test the slot selected is not mapped, so do nothing.
+    mock_dev_components = MagicMock()
+    mock_dev_components.selected = True
+    mock_dev_components.index = 0
+    mock_atft.app_settings_dialog.dev_mapping_components = [mock_dev_components]
+    mock_atft.UnmapUSBLocationToSlot(MagicMock())
+    mock_atft._SendAlertEvent.assert_not_called()
+    mock_atft.ShowWarning.assert_not_called()
+
+    # Normal case: the slot selected is mapped, unmap it.
+    mock_atft.device_usb_locations[0] = self.TEST_LOCATION1
+    mock_atft.device_usb_locations[1] = self.TEST_LOCATION2
+    mock_atft.app_settings_dialog.dev_mapping_components = [mock_dev_components]
+    # User click yes.
+    mock_atft.ShowWarning.return_value = True
+    mock_atft.UnmapUSBLocationToSlot(MagicMock())
+    mock_atft._SendAlertEvent.assert_not_called()
+    mock_atft.ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.reset_mock()
+    self.assertEqual(None, mock_atft.device_usb_locations[0])
+    self.assertEqual(self.TEST_LOCATION2, mock_atft.device_usb_locations[1])
+
+    # User click no for confirmation.
+    mock_atft.device_usb_locations[0] = self.TEST_LOCATION1
+    mock_atft.device_usb_locations[1] = self.TEST_LOCATION2
+    mock_atft.app_settings_dialog.dev_mapping_components = [mock_dev_components]
+    mock_atft.ShowWarning.return_value = False
+    mock_atft.UnmapUSBLocationToSlot(MagicMock())
+    mock_atft._SendAlertEvent.assert_not_called()
+    mock_atft.ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.reset_mock()
+    self.assertEqual(self.TEST_LOCATION1, mock_atft.device_usb_locations[0])
+    self.assertEqual(self.TEST_LOCATION2, mock_atft.device_usb_locations[1])
 
   @patch('threading.Timer')
   def testProcessKeyFileAutomatically(self, mock_create_timer):
@@ -3307,6 +3319,95 @@ class AtftTest(TestCase):
     displayed_devs = mock_atft._GetDisplayedDevices()
     self.assertEqual(0, len(target_devs))
     self.assertEqual(0, len(displayed_devs))
+
+  def testCheckMappingMode(self):
+    # Test Atft._CheckMappingMode.
+    mock_atft = MockAtft()
+    mock_atft.ChangeSettings = MagicMock()
+    mock_atft.app_settings_dialog = MagicMock()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting = MagicMock()
+    mock_atft.change_mapping_mode_dialog = MagicMock()
+    mock_atft.change_mapping_mode_dialog.ShowModal = MagicMock()
+    mock_atft.ShowWarning = MagicMock()
+    mock_atft.ignored_unmapped_device_serials = sets.Set()
+
+    # Only one target device in single device mode, do nothing.
+    mock_atft.mapping_mode = mock_atft.SINGLE_DEVICE_MODE
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.target_devs = [self.test_dev1]
+    mock_atft._CheckMappingMode()
+    mock_atft.change_mapping_mode_dialog.ShowModal.assert_not_called()
+    mock_atft.ChangeSettings.assert_not_called()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting.assert_not_called()
+    mock_atft.ShowWarning.assert_not_called()
+
+    # Two target devices in single device mode, user choose mapping.
+    mock_atft.mapping_mode = mock_atft.SINGLE_DEVICE_MODE
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.target_devs = [self.test_dev1, self.test_dev2]
+    mock_atft.change_mapping_mode_dialog.ShowModal.return_value = wx.ID_YES
+    mock_atft._CheckMappingMode()
+    mock_atft.change_mapping_mode_dialog.ShowModal.assert_called_once()
+    mock_atft.change_mapping_mode_dialog.ShowModal.reset_mock()
+    mock_atft.ChangeSettings.assert_called_once()
+    mock_atft.ChangeSettings.reset_mock()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting.assert_called_once()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting.reset_mock()
+    mock_atft.ShowWarning.assert_not_called()
+
+    # All target devices already mapped in multiple device mode, do nothing.
+    mock_atft.mapping_mode = mock_atft.MULTIPLE_DEVICE_MODE
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.target_devs = [self.test_dev1]
+    mock_atft.device_usb_locations = [self.TEST_LOCATION1]
+    mock_atft._CheckMappingMode()
+    mock_atft.change_mapping_mode_dialog.ShowModal.assert_not_called()
+    mock_atft.ChangeSettings.assert_not_called()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting.assert_not_called()
+    mock_atft.ShowWarning.assert_not_called()
+
+    # One target device not mapped, show warning, user click yes.
+    mock_atft.mapping_mode = mock_atft.MULTIPLE_DEVICE_MODE
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.target_devs = [self.test_dev1, self.test_dev2]
+    mock_atft.device_usb_locations = [self.TEST_LOCATION1]
+    mock_atft.ShowWarning.return_value = True
+    mock_atft._CheckMappingMode()
+    mock_atft.change_mapping_mode_dialog.ShowModal.assert_not_called()
+    mock_atft.ChangeSettings.assert_called_once()
+    mock_atft.ChangeSettings.reset_mock()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting.assert_called_once()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting.reset_mock()
+    mock_atft.ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.reset_mock()
+
+    # Make sure this device is ignored the second time.
+    mock_atft._CheckMappingMode()
+    mock_atft.change_mapping_mode_dialog.ShowModal.assert_not_called()
+    mock_atft.ChangeSettings.assert_not_called()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting.assert_not_called()
+    mock_atft.ShowWarning.assert_not_called()
+
+    # One target device not mapped, show warning, user click no.
+    mock_atft.ignored_unmapped_device_serials = sets.Set()
+    mock_atft.mapping_mode = mock_atft.MULTIPLE_DEVICE_MODE
+    mock_atft.atft_manager = MagicMock()
+    mock_atft.atft_manager.target_devs = [self.test_dev1, self.test_dev2]
+    mock_atft.device_usb_locations = [self.TEST_LOCATION1]
+    mock_atft.ShowWarning.return_value = False
+    mock_atft._CheckMappingMode()
+    mock_atft.change_mapping_mode_dialog.ShowModal.assert_not_called()
+    mock_atft.ChangeSettings.assert_not_called()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting.assert_not_called()
+    mock_atft.ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.reset_mock()
+
+    # Make sure this device is ignored the second time.
+    mock_atft._CheckMappingMode()
+    mock_atft.change_mapping_mode_dialog.ShowModal.assert_not_called()
+    mock_atft.ChangeSettings.assert_not_called()
+    mock_atft.app_settings_dialog.ShowUSBMappingSetting.assert_not_called()
+    mock_atft.ShowWarning.assert_not_called()
 
 
 if __name__ == '__main__':
