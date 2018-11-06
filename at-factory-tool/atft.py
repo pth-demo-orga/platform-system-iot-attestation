@@ -523,7 +523,10 @@ class AtftAudit(object):
     filepath = os.path.join(
         self.audit_dir, AtftAudit.GetAuditFileName(serial))
 
-    if not self.get_file_handler(filepath, 'audit', False, True):
+    # If somehow we have another operation ongoing while trying to download
+    # audit file, let the download fail and do not block. Also do not give
+    # alert for automatic process.
+    if not self.get_file_handler(filepath, 'audit', False, False):
       return False
 
     # We only remove old files if we successfully pull audit file.
@@ -3940,6 +3943,8 @@ class Atft(wx.Frame):
     """Update the number of keys left in ATFA.
 
     Update the number of keys left for the selected product in the ATFA device.
+    Note that this operation would possibly include downloading audit file
+    operation, so you should not call this function within any operation.
 
     Returns:
       Whether the check succeed or not.
@@ -4358,6 +4363,7 @@ class Atft(wx.Frame):
     if not self._StartOperation(operation, atfa_dev, True, auto_prov):
      return
 
+    provision_failed = False
     try:
       self.atft_manager.Provision(target, is_som_key)
     except DeviceNotFoundException as e:
@@ -4366,12 +4372,15 @@ class Atft(wx.Frame):
       return
     except FastbootFailure as e:
       self._HandleException('E', e, operation, [target])
-      # If it fails, one key might also be used.
-      self._UpdateKeysLeftInATFA()
-      return
+      provision_failed = True
     finally:
       self._EndOperation(atfa_dev)
       self._EndOperation(target)
+
+    if provision_failed:
+      # If it fails, one key might also be used.
+      self._UpdateKeysLeftInATFA()
+      return
 
     self._SendOperationSucceedEvent(operation, target)
     if not is_som_key:
@@ -4459,6 +4468,9 @@ class Atft(wx.Frame):
     show_alert = True
     blocking = False
     if auto_process:
+      # If this processing is trigger automatically, then there might be chance
+      # when another operation is ongoing. We would block this thread until
+      # there is no other operation and we could start the processing.
       show_alert = False
       blocking = True
     if not self._StartOperation(operation, atfa_dev, show_alert, blocking):
@@ -4535,7 +4547,6 @@ class Atft(wx.Frame):
       is_som_key = self.atft_manager.som_info is not None
       self.atft_manager.PurgeATFAKey(is_som_key)
       self._SendOperationSucceedEvent(operation)
-      self._UpdateKeysLeftInATFA()
     except ProductNotSpecifiedException as e:
       self._HandleException('W', e, operation)
       return
@@ -4550,6 +4561,8 @@ class Atft(wx.Frame):
       return
     finally:
       self._EndOperation(atfa_dev)
+    # Update the number of keys left, should be 0.
+    self._UpdateKeysLeftInATFA()
 
   def _GetRegFile(self, filepath):
     self._CreateThread(self._GetFileFromATFA, filepath, 'reg', True, False)
