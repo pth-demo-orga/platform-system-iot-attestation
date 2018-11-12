@@ -225,7 +225,7 @@ class AtftString(object):
     self.BUTTON_MAP_USB_LOCATION = ['Map USB Locations', '关联USB位置'][index]
     self.BUTTON_LANGUAGE_PREFERENCE = ['Language Preference', '语言偏好'][index]
     self.BUTTON_SET_PASSWORD = ['Set Password', '设置密码'][index]
-    self.BUTTON_AUTOMAP = ['Automap', '自动关联'][index]
+    self.BUTTON_UNMAP = ['Unmap', '取消关联'][index]
     self.BUTTON_REMAP = ['Remap', '重新关联'][index]
     self.BUTTON_MAP = ['Map', '关联'][index]
     self.BUTTON_CANCEL = ['Cancel', '取消'][index]
@@ -318,7 +318,10 @@ class AtftString(object):
         '无法传输密钥给一个不在正确状态或者已经拥有密钥的设备！'][index]
     self.ALERT_NO_MAP_DEVICE_CHOSEN = [
         'No device location chosen for mapping!',
-        ' 未选择要关联的设备位置'][index]
+        '未选择要关联的设备位置'][index]
+    self.ALERT_NO_UNMAP_DEVICE_CHOSEN = [
+        'No device location chosen for unmapping!',
+        '未选择要取消关联的设备位置'][index]
     self.ALERT_MAP_DEVICE_TIMEOUT = [
         'Mapping Failure!\nNo ATFA device detected at any USB Location!',
         '关联失败！\n没有在任何USB口检测到ATFA设备！'][index]
@@ -344,11 +347,9 @@ class AtftString(object):
             ('设备位置' + slot.encode('utf-8') +
              '已经被关联到USB位置' + location.encode('utf-8') + ', 是否覆盖?')
         ][index]
-    self.ALERT_REMAP_ALL = [
-        'Auto mapping would overwrite previous configure, do you want to '
-        'continue?',
-        '自动关联将会覆盖之前的关联配置，是否继续？'
-        ][index]
+    self.ALERT_UNMAP = [
+        'Do you really want to unmap this USB port?',
+        '你确定要取消关联这个USB位置吗?'][index]
     self.ALERT_ADD_MORE_KEY = [
         lambda keys_left:
             'Warning - add more keys\n'
@@ -433,6 +434,12 @@ class AtftString(object):
         'Detected multiple target devices! Unplug one device and click cancel '
         'or click map to map USB locations to UI slots.',
         '检测到多个目标设备，请拔出一个设备或者关联USB位置到一个界面上的设备槽位'][index]
+    self.ALERT_TARGET_DEVICE_UNMAPPED = [
+        'Detected a target device plugged in an unmapped USB port, this'
+        ' device will be ignored unless you map the USB port, do you want to '
+        'map the port now?',
+        '检测到一个目标设备插在一个没有被关联的USB位置上，这个设备将被忽略除非你关联USB位置'
+        '，是否关联？'][index]
 
     self.STATUS_MAPPED = ['Mapped', '已关联位置'][index]
     self.STATUS_NOT_MAPPED = ['Not mapped', '未关联位置'][index]
@@ -1049,7 +1056,7 @@ class AppSettingsDialog(wx.Dialog):
   """
 
   def __init__(self, atft_string,
-               auto_map_usb_location_handler,
+               unmap_usb_location_handler,
                manual_map_usb_location_handler,
                map_usb_to_slot_handler,
                change_language_handler,
@@ -1060,7 +1067,7 @@ class AppSettingsDialog(wx.Dialog):
 
     Args:
       atft_string: The class for string constants.
-      auto_map_usb_location_handler: The handler for clicking 'automap' button.
+      unmap_usb_location_handler: The handler for clicking 'unmap' button.
       manual_map_usb_location_handler: The handler for clicking 'map' button.
       map_usb_to_slot_handler: The handler for clicking each slot.
       change_language_handler: The handler for changing language.
@@ -1072,7 +1079,7 @@ class AppSettingsDialog(wx.Dialog):
     self.settings = []
     self.menu_items = []
     self.current_setting = None
-    self.auto_map_usb_location_handler = auto_map_usb_location_handler
+    self.unmap_usb_location_handler = unmap_usb_location_handler
     self.manual_map_usb_location_handler = manual_map_usb_location_handler
     self.map_usb_to_slot_handler = map_usb_to_slot_handler
     self.change_language_handler = change_language_handler
@@ -1125,25 +1132,25 @@ class AppSettingsDialog(wx.Dialog):
         id=wx.ID_CANCEL)
     button_map = wx.Button(
         self, label=self.atft_string.BUTTON_MAP, size=(130, 30), id=wx.ID_ANY)
-    button_automap = wx.Button(
-        self, label=self.atft_string.BUTTON_AUTOMAP, size=(130, 30),
+    button_unmap = wx.Button(
+        self, label=self.atft_string.BUTTON_UNMAP, size=(130, 30),
         id=wx.ID_ANY)
     button_save = wx.Button(
         self, label=self.atft_string.BUTTON_SAVE, size=(130, 30), id=wx.ID_ANY)
     button_font = wx.Font(12, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
     button_map.SetFont(button_font)
-    button_automap.SetFont(button_font)
+    button_unmap.SetFont(button_font)
     button_cancel.SetFont(button_font)
     button_save.SetFont(button_font)
 
     buttons_sizer.Add(button_cancel)
     buttons_sizer.Add(button_map, 0, wx.LEFT, 10)
-    buttons_sizer.Add(button_automap, 0, wx.LEFT, 10)
+    buttons_sizer.Add(button_unmap, 0, wx.LEFT, 10)
     buttons_sizer.Add(button_save, 0, wx.LEFT, 10)
 
     self.button_cancel = button_cancel
     self.button_map = button_map
-    self.button_automap = button_automap
+    self.button_unmap = button_unmap
     self.button_save = button_save
     self.buttons_sizer = buttons_sizer
     self.panel_sizer.AddSpacer(20)
@@ -1151,7 +1158,7 @@ class AppSettingsDialog(wx.Dialog):
 
     # Bind handlers
     self.button_map.Bind(wx.EVT_BUTTON, self.manual_map_usb_location_handler)
-    self.button_automap.Bind(wx.EVT_BUTTON, self.auto_map_usb_location_handler)
+    self.button_unmap.Bind(wx.EVT_BUTTON, self.unmap_usb_location_handler)
     self.button_cancel.Bind(wx.EVT_BUTTON, self.OnExit)
     self.button_save.Bind(wx.EVT_BUTTON, self.OnSaveSetting)
 
@@ -1308,7 +1315,7 @@ class AppSettingsDialog(wx.Dialog):
     """
     self.button_save.Hide()
     self.button_map.Show()
-    self.button_automap.Show()
+    self.button_unmap.Show()
     self.buttons_sizer.Layout()
     self.current_setting = self.usb_mapping_panel
     self.current_menu = self.menu_map_usb
@@ -1322,7 +1329,7 @@ class AppSettingsDialog(wx.Dialog):
     """
     self.button_save.Show()
     self.button_map.Hide()
-    self.button_automap.Hide()
+    self.button_unmap.Hide()
     self.buttons_sizer.Layout()
     self.current_setting = self.language_setting
     self.current_menu = self.menu_language
@@ -1331,7 +1338,7 @@ class AppSettingsDialog(wx.Dialog):
   def ShowPasswordSetting(self, event):
     self.button_save.Show()
     self.button_map.Hide()
-    self.button_automap.Hide()
+    self.button_unmap.Hide()
     self.buttons_sizer.Layout()
     self.current_setting = self.password_setting
     self.current_menu = self.menu_set_password
@@ -1464,6 +1471,10 @@ class Atft(wx.Frame):
     # Store the last refreshed target list, we use this list to prevent
     # refreshing the same list.
     self.last_target_list = []
+
+    # List of serial numbers of the target devices that are not mapped and
+    # ignored.
+    self.ignored_unmapped_device_serials = sets.Set()
 
     # Indicate whether in auto provisioning mode.
     self.auto_prov = False
@@ -2035,7 +2046,7 @@ class Atft(wx.Frame):
     # App Settings Dialog
     self.app_settings_dialog = AppSettingsDialog(
         self.atft_string,
-        self.AutoMapUSBLocationToSlot,
+        self.UnmapUSBLocationToSlot,
         self.ManualMapUSBLocationToSlot,
         self.MapUSBToSlotHandler,
         self.ChangeLanguage,
@@ -3564,7 +3575,11 @@ class Atft(wx.Frame):
   def SendUpdateMappingEvent(self):
     """Send an event to indicate the mapping status need to be updated.
     """
-    self.mapping_mode = self.MULTIPLE_DEVICE_MODE
+    self.mapping_mode = self.SINGLE_DEVICE_MODE
+    for i in range(TARGET_DEV_SIZE):
+      if self.device_usb_locations[i]:
+        self.mapping_mode = self.MULTIPLE_DEVICE_MODE
+        break
     self._ChangeMappingMode()
     wx.QueueEvent(self, Event(self.update_mapping_status_event))
 
@@ -3609,13 +3624,21 @@ class Atft(wx.Frame):
 
     if (not self.start_screen_shown and self.sup_mode and
         self.checking_mapping_mode_lock.acquire(False)):
-      # Check if multiple devices detected in SINGLE_DEVICE mode. We only
-      # check mapping mode if in supervisor mode and the welcome screen
-      # is not shown.
-      self._CheckMappingMode()
-      self.checking_mapping_mode_lock.release();
+      if not self.app_settings_dialog.IsShown():
+        # Check if multiple devices detected in SINGLE_DEVICE mode. We only
+        # check mapping mode if in supervisor mode, the welcome screen
+        # is not shown and not in settings.
+        self._CheckMappingMode()
+      self.checking_mapping_mode_lock.release()
 
     self._PrintAtfaDevice()
+
+    # Remove ignored target device if the device is unplugged
+    new_ignored_serials = sets.Set()
+    for serial in self.ignored_unmapped_device_serials:
+      if self.atft_manager.GetTargetDevice(serial):
+        new_ignored_serials.add(serial)
+    self.ignored_unmapped_device_serials = new_ignored_serials
 
     if self.last_target_list == self.atft_manager.target_devs:
       # Nothing changes, no need to refresh
@@ -3638,11 +3661,22 @@ class Atft(wx.Frame):
         # We detected multiple target devices in single device mode.
         while True:
           if self.change_mapping_mode_dialog.ShowModal() == wx.ID_YES:
-            self.ChangeSettings(True)
+            self.ChangeSettings(None)
             self.app_settings_dialog.ShowUSBMappingSetting(None)
             break
           elif len(self.atft_manager.target_devs) <= 1:
             break
+    else:
+      for target_dev in self.atft_manager.target_devs:
+        if target_dev.serial_number in self.ignored_unmapped_device_serials:
+          continue
+        if target_dev.location not in self.device_usb_locations:
+          if self.ShowWarning(self.atft_string.ALERT_TARGET_DEVICE_UNMAPPED):
+            self.ChangeSettings(None)
+            self.app_settings_dialog.ShowUSBMappingSetting(None)
+          # No matter user choose mapping or not, we would not ask again unless
+          # this device is unplugged.
+          self.ignored_unmapped_device_serials.add(target_dev.serial_number)
 
   def _ChangeMappingMode(self):
     """Change the mapping mode.
@@ -3759,7 +3793,7 @@ class Atft(wx.Frame):
     """
     displayed_devs = self._GetDisplayedDevices()
     return [dev for dev in displayed_devs if
-            dev.provision_status != ProvisionStatus.REBOOT_IN_PROGRESS];
+            dev.provision_status != ProvisionStatus.REBOOT_IN_PROGRESS]
 
   def _ShowTargetDevice(self, dev_component, serial_number, serial_text, status,
                         state):
@@ -4700,33 +4734,35 @@ class Atft(wx.Frame):
     self.device_usb_locations[index] = location
     self.SendUpdateMappingEvent()
 
-  def AutoMapUSBLocationToSlot(self, event):
-    """The handler to map connected target devices to UI slots in the tool.
+  def UnmapUSBLocationToSlot(self, event):
+    """The handler to unmap a UI slot from a mapped USB port.
 
-    This handler would be triggered if the 'automap' button on the USB Location
-    Mapping interface is clicked. It would randomly map the connected Android
-    Things device to the UI slots.
+    This handler would be triggered if the 'unmap' button on the USB Location
+    Mapping interface is clicked. It would unmap a UI slot from a already mapped
+    USB port.
 
     Args:
       event: The triggering event.
     """
-    for i in range(TARGET_DEV_SIZE):
-      if (self.device_usb_locations[i]):
-        if not self.ShowWarning(self.atft_string.ALERT_REMAP_ALL):
-          return
-        else:
-          break
 
-    if not self.atft_manager.target_devs:
-      self._SendAlertEvent(self.atft_string.ALERT_NO_TARGET_DEVICE)
+    selected = [
+        dev_component
+            for dev_component in self.app_settings_dialog.dev_mapping_components
+            if dev_component.selected]
+
+    if not selected:
+      self._SendAlertEvent(self.atft_string.ALERT_NO_UNMAP_DEVICE_CHOSEN)
       return
 
-    for i in range(TARGET_DEV_SIZE):
-      if i >= len(self.atft_manager.target_devs):
-        self.device_usb_locations[i] = None
-        continue
-      self.device_usb_locations[i] = self.atft_manager.target_devs[i].location
+    component = selected[0]
+    index = component.index
 
+    if self.device_usb_locations[index]:
+      # If this slot was already mapped, warn the user.
+      if not self.ShowWarning(self.atft_string.ALERT_UNMAP):
+        return
+
+    self.device_usb_locations[index] = None
     self.SendUpdateMappingEvent()
 
   def ChangeLanguage(self, language_text):
