@@ -145,6 +145,7 @@ class AtftString(object):
     self.MENU_CLEAR_COMMAND = ['Clear Command Output', '清空控制台'][index]
     self.MENU_SHOW_STATUS_BAR = ['Show Statusbar', '显示状态栏'][index]
     self.MENU_CHOOSE_PRODUCT = ['Choose Product', '选择产品'][index]
+    self.MENU_SKIP_PRODUCT = ['Skip', '跳过'][index]
     self.MENU_APP_SETTINGS = ['App Settings', '程序设置'][index]
     self.MENU_QUIT = ['quit', '退出'][index]
 
@@ -2380,9 +2381,21 @@ class Atft(wx.Frame):
     button_choose_product.SetFont(font)
     button_choose_product.SetBackgroundColour(COLOR_DARK_GREY)
     button_choose_product.SetForegroundColour(COLOR_WHITE)
-
     start_screen_sizer.Add(button_choose_product, 0, wx.ALIGN_CENTER)
     button_choose_product.Bind(wx.EVT_BUTTON, self.ChooseProduct)
+
+    button_skip_product = wx.Button(
+        self.start_screen,
+        label=self.atft_string.MENU_SKIP_PRODUCT,
+        size=(150, 30))
+    font = wx.Font(10, wx.DEFAULT, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    button_skip_product.SetFont(font)
+    button_skip_product.SetBackgroundColour(COLOR_DARK_GREY)
+    button_skip_product.SetForegroundColour(COLOR_LIGHT_GREY_TEXT)
+    start_screen_sizer.AddSpacer(20)
+    start_screen_sizer.Add(button_skip_product, 0, wx.ALIGN_CENTER)
+    button_skip_product.Bind(wx.EVT_BUTTON, self.SkipProduct)
+
     self.start_screen.Layout()
     self.SetSize(self.start_screen.GetSize())
     self.CenterOnParent()
@@ -2803,6 +2816,41 @@ class Atft(wx.Frame):
       self.filename = filename
       self.callback = callback
 
+  def SkipProduct(self, event):
+    """User skip choosing product.
+
+    Args:
+      event: The triggering event.
+    """
+
+    if self.start_screen_shown:
+      self.HideStartScreen()
+    self._EnableDisableMenuItems(False)
+
+  def _EnableDisableMenuItems(self, enable_menu):
+    """Disable/Enable part of the menu items that require product file.
+
+    Disable/Enable all the actions that would not work if product attribute file
+    is not selected.
+
+    Args:
+      enable_menu: Whether to enable/disable menu items.
+    """
+    manual_prov_id = self.provision_menu.FindItem(
+        self.atft_string.MENU_MANUAL_PROV)
+    self.provision_menu.Enable(manual_prov_id, enable_menu)
+    manual_fuse_vboot_id = self.provision_menu.FindItem(
+        self.atft_string.MENU_MANUAL_FUSE_VBOOT)
+    self.provision_menu.Enable(manual_fuse_vboot_id, enable_menu)
+    manual_fuse_attr_id = self.provision_menu.FindItem(
+        self.atft_string.MENU_MANUAL_FUSE_ATTR)
+    self.provision_menu.Enable(manual_fuse_attr_id, enable_menu)
+    atfa_status_id = self.atfa_menu.FindItem(
+        self.atft_string.MENU_ATFA_STATUS)
+    self.atfa_menu.Enable(atfa_status_id, enable_menu)
+    purge_key_id = self.key_menu.FindItem(self.atft_string.MENU_PURGE)
+    self.key_menu.Enable(purge_key_id, enable_menu)
+
   def ChooseProduct(self, event):
     """Ask user to choose the product attributes file.
 
@@ -2853,6 +2901,11 @@ class Atft(wx.Frame):
               self.atft_manager.product_info or self.atft_manager.som_info)):
           self.audit.ResetKeysLeft()
           self._UpdateKeysLeftInATFA()
+
+        if self.atft_manager.product_info or self.atft_manager.som_info:
+          # If a product or som is chosen, enable the menu items that require
+          # a product file.
+          self._EnableDisableMenuItems(True)
 
         # If user change from one mode to another mode, change the default
         # provision steps.
