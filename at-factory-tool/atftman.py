@@ -88,50 +88,50 @@ class ProvisionStatus(object):
 
   IDLE                  = 0
   WAITING               = 1
-  FUSEVBOOT_ING         = (10 + _PROCESSING)
+  FUSEVBOOT_IN_PROGRESS = (10 + _PROCESSING)
   FUSEVBOOT_SUCCESS     = (10 + _SUCCESS)
   FUSEVBOOT_FAILED      = (10 + _FAILED)
-  REBOOT_ING            = (20 + _PROCESSING)
+  REBOOT_IN_PROGRESS    = (20 + _PROCESSING)
   REBOOT_SUCCESS        = (20 + _SUCCESS)
   REBOOT_FAILED         = (20 + _FAILED)
-  FUSEATTR_ING          = (30 + _PROCESSING)
+  FUSEATTR_IN_PROGRESS  = (30 + _PROCESSING)
   FUSEATTR_SUCCESS      = (30 + _SUCCESS)
   FUSEATTR_FAILED       = (30 + _FAILED)
-  LOCKAVB_ING           = (40 + _PROCESSING)
+  LOCKAVB_IN_PROGRESS   = (40 + _PROCESSING)
   LOCKAVB_SUCCESS       = (40 + _SUCCESS)
   LOCKAVB_FAILED        = (40 + _FAILED)
-  PROVISION_ING         = (50 + _PROCESSING)
+  PROVISION_IN_PROGRESS = (50 + _PROCESSING)
   PROVISION_SUCCESS     = (50 + _SUCCESS)
   PROVISION_FAILED      = (50 + _FAILED)
-  UNLOCKAVB_ING         = (60 + _PROCESSING)
+  UNLOCKAVB_IN_PROGRESS = (60 + _PROCESSING)
   UNLOCKAVB_SUCCESS     = (60 + _SUCCESS)
   UNLOCKAVB_FAILED      = (60 + _FAILED)
-  SOM_PROVISION_ING     = (70 + _PROCESSING)
+  SOM_PROVISION_IN_PROGRESS = (70 + _PROCESSING)
   SOM_PROVISION_SUCCESS = (70 + _SUCCESS)
   SOM_PROVISION_FAILED  = (70 + _FAILED)
 
   STRING_MAP = {
     IDLE                  : ['Idle', '初始'],
     WAITING               : ['Waiting', '等待'],
-    FUSEVBOOT_ING         : ['Fusing VbootKey...', '烧录引导密钥中...'],
+    FUSEVBOOT_IN_PROGRESS : ['Fusing VbootKey...', '烧录引导密钥中...'],
     FUSEVBOOT_SUCCESS     : ['Bootloader Locked', '已烧录引导密钥'],
     FUSEVBOOT_FAILED      : ['Lock Vboot Failed', '烧录引导密钥失败'],
-    REBOOT_ING            : ['Rebooting...', '重启设备中...'],
+    REBOOT_IN_PROGRESS    : ['Rebooting...', '重启设备中...'],
     REBOOT_SUCCESS        : ['Rebooted', '已重启设备'],
     REBOOT_FAILED         : ['Reboot Failed', '重启设备失败'],
-    FUSEATTR_ING          : ['Fusing PermAttr', '烧录产品信息中...'],
+    FUSEATTR_IN_PROGRESS  : ['Fusing PermAttr', '烧录产品信息中...'],
     FUSEATTR_SUCCESS      : ['PermAttr Fused', '已烧录产品信息'],
     FUSEATTR_FAILED       : ['Fuse PermAttr Failed', '烧录产品信息失败'],
-    LOCKAVB_ING           : ['Locking AVB', '锁定AVB中...'],
+    LOCKAVB_IN_PROGRESS   : ['Locking AVB', '锁定AVB中...'],
     LOCKAVB_SUCCESS       : ['AVB Locked', '已锁定AVB'],
     LOCKAVB_FAILED        : ['Lock AVB Failed', '锁定AVB失败'],
-    PROVISION_ING         : ['Giving Key', '传输密钥中...'],
+    PROVISION_IN_PROGRESS : ['Giving Key', '传输密钥中...'],
     PROVISION_SUCCESS     : ['Success', '成功!'],
     PROVISION_FAILED      : ['Provision Failed', '传输密钥失败'],
-    UNLOCKAVB_ING         : ['Unlocking AVB', '解锁AVB中...'],
+    UNLOCKAVB_IN_PROGRESS : ['Unlocking AVB', '解锁AVB中...'],
     UNLOCKAVB_SUCCESS     : ['AVB Unlocked', '已解锁AVB'],
     UNLOCKAVB_FAILED      : ['Unlock AVB Failed', '解锁AVB失败'],
-    SOM_PROVISION_ING     : ['Giving SoMKey', '传输SoM密钥中...'],
+    SOM_PROVISION_IN_PROGRESS : ['Giving SoMKey', '传输SoM密钥中...'],
     SOM_PROVISION_SUCCESS : ['SoM Key Stored', 'SoM密钥已传输!'],
     SOM_PROVISION_FAILED  : ['SoM Key Failed', '传输SoM密钥失败']
 
@@ -345,8 +345,6 @@ class AtftManager(object):
     target_dev: A FastbootDevice object identifying the AT device
       to be provisioned.
   """
-  SORT_BY_SERIAL = 0
-  SORT_BY_LOCATION = 1
   # The length of the permanent attribute should be 1052.
   EXPECTED_ATTRIBUTE_LENGTH = 1052
 
@@ -449,7 +447,7 @@ class AtftManager(object):
   def GetATFASerial(self):
     return self._atfa_dev_manager.GetSerial()
 
-  def ListDevices(self, sort_by=SORT_BY_LOCATION):
+  def ListDevices(self):
     """Get device list.
 
     Get the serial number of the ATFA device and the target device. If the
@@ -460,15 +458,12 @@ class AtftManager(object):
       DeviceCreationException: When a device fails to be created.
       OsVersionNotAvailableException: When we cannot get the atfa version.
       OsVersionNotCompatibleException: When the atfa version is not compatible.
-
-    Args:
-      sort_by: The field to sort by.
     """
     # ListDevices returns a list of USBHandles
     device_serials = self._fastboot_device_controller.ListDevices()
     self.UpdateDevices(device_serials)
     self._HandleRebootCallbacks()
-    self._SortTargetDevices(sort_by)
+    self.target_devs.sort(key=AtftManager._LocationAsKey)
 
   def UpdateDevices(self, device_serials):
     """Update device list.
@@ -493,18 +488,6 @@ class AtftManager(object):
     if device.location is None:
       return ''
     return device.location
-
-  def _SortTargetDevices(self, sort_by):
-    """Sort the target device list according to sort_by field.
-
-    Args:
-      sort_by: The field to sort by, possible values are:
-        self.SORT_BY_LOCATION and self.SORT_BY_SERIAL.
-    """
-    if sort_by == self.SORT_BY_LOCATION:
-      self.target_devs.sort(key=AtftManager._LocationAsKey)
-    elif sort_by == self.SORT_BY_SERIAL:
-      self.target_devs.sort(key=AtftManager._SerialAsKey)
 
   def _UpdateSerials(self, device_serials):
     """Update the stored pending_serials and stable_serials.
@@ -565,7 +548,7 @@ class AtftManager(object):
     self.target_devs = [
         device for device in self.target_devs
         if (device.serial_number in new_targets or
-            device.provision_status == ProvisionStatus.REBOOT_ING)
+            device.provision_status == ProvisionStatus.REBOOT_IN_PROGRESS)
     ]
 
     common_serials = [device.serial_number for device in self.target_devs]
@@ -886,9 +869,9 @@ class AtftManager(object):
     """
     try:
       if not is_som_key:
-        target.provision_status = ProvisionStatus.PROVISION_ING
+        target.provision_status = ProvisionStatus.PROVISION_IN_PROGRESS
       else:
-        target.ProvisionStatus = ProvisionStatus.SOM_PROVISION_ING
+        target.ProvisionStatus = ProvisionStatus.SOM_PROVISION_IN_PROGRESS
       atfa = self._atfa_dev_manager.GetATFADevice()
       AtftManager.CheckDevice(atfa)
       # Set the ATFA's time first.
@@ -942,7 +925,7 @@ class AtftManager(object):
       raise ProductNotSpecifiedException
 
     # Create a temporary file to store the vboot key.
-    target.provision_status = ProvisionStatus.FUSEVBOOT_ING
+    target.provision_status = ProvisionStatus.FUSEVBOOT_IN_PROGRESS
     try:
       temp_file = tempfile.NamedTemporaryFile(delete=False)
       temp_file.write(vboot_key)
@@ -970,7 +953,7 @@ class AtftManager(object):
       target.provision_status = ProvisionStatus.FUSEATTR_FAILED
       raise ProductNotSpecifiedException
     try:
-      target.provision_status = ProvisionStatus.FUSEATTR_ING
+      target.provision_status = ProvisionStatus.FUSEATTR_IN_PROGRESS
       temp_file = tempfile.NamedTemporaryFile(delete=False)
       temp_file.write(self.product_info.product_attributes)
       temp_file.close()
@@ -996,7 +979,7 @@ class AtftManager(object):
       FastbootFailure: When fastboot command fails.
     """
     try:
-      target.provision_status = ProvisionStatus.LOCKAVB_ING
+      target.provision_status = ProvisionStatus.LOCKAVB_IN_PROGRESS
       target.Oem('at-lock-vboot')
       self.CheckProvisionStatus(target)
       if not target.provision_state.avb_locked:
@@ -1014,7 +997,7 @@ class AtftManager(object):
       FastbootFailure: When fastboot command fails.
     """
     try:
-      target.provision_status = ProvisionStatus.UNLOCKAVB_ING
+      target.provision_status = ProvisionStatus.UNLOCKAVB_IN_PROGRESS
       unlock_command = 'at-unlock-vboot'
       if self.UNLOCK_CREDENTIAL:
         unlock_command += ' ' + self.UNLOCK_CREDENTIAL
@@ -1053,7 +1036,7 @@ class AtftManager(object):
       self.stable_serials.remove(serial)
       # Create a rebooting target device that only contains serial and location.
       rebooting_target = DeviceInfo(None, serial, location)
-      rebooting_target.provision_status = ProvisionStatus.REBOOT_ING
+      rebooting_target.provision_status = ProvisionStatus.REBOOT_IN_PROGRESS
       self.target_devs.append(rebooting_target)
 
       reboot_callback = RebootCallback(

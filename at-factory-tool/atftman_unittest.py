@@ -112,22 +112,22 @@ class AtftManTest(unittest.TestCase):
   def GetAllProvisionStatus(self):
     return [ProvisionStatus.IDLE,
             ProvisionStatus.WAITING,
-            ProvisionStatus.FUSEVBOOT_ING,
+            ProvisionStatus.FUSEVBOOT_IN_PROGRESS,
             ProvisionStatus.FUSEVBOOT_SUCCESS,
             ProvisionStatus.FUSEVBOOT_FAILED,
-            ProvisionStatus.REBOOT_ING,
+            ProvisionStatus.REBOOT_IN_PROGRESS,
             ProvisionStatus.REBOOT_SUCCESS,
             ProvisionStatus.REBOOT_FAILED,
-            ProvisionStatus.FUSEATTR_ING,
+            ProvisionStatus.FUSEATTR_IN_PROGRESS,
             ProvisionStatus.FUSEATTR_SUCCESS,
             ProvisionStatus.FUSEATTR_FAILED,
-            ProvisionStatus.LOCKAVB_ING,
+            ProvisionStatus.LOCKAVB_IN_PROGRESS,
             ProvisionStatus.LOCKAVB_SUCCESS,
             ProvisionStatus.LOCKAVB_FAILED,
-            ProvisionStatus.PROVISION_ING,
+            ProvisionStatus.PROVISION_IN_PROGRESS,
             ProvisionStatus.PROVISION_SUCCESS,
             ProvisionStatus.PROVISION_FAILED,
-            ProvisionStatus.UNLOCKAVB_ING,
+            ProvisionStatus.UNLOCKAVB_IN_PROGRESS,
             ProvisionStatus.UNLOCKAVB_SUCCESS,
             ProvisionStatus.UNLOCKAVB_FAILED]
 
@@ -143,11 +143,11 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(
         False, ProvisionStatus.isFailed(ProvisionStatus.LOCKAVB_SUCCESS))
     self.assertEqual(
-        False, ProvisionStatus.isSuccess(ProvisionStatus.FUSEATTR_ING))
+        False, ProvisionStatus.isSuccess(ProvisionStatus.FUSEATTR_IN_PROGRESS))
     self.assertEqual(
-        True, ProvisionStatus.isProcessing(ProvisionStatus.FUSEATTR_ING))
+        True, ProvisionStatus.isProcessing(ProvisionStatus.FUSEATTR_IN_PROGRESS))
     self.assertEqual(
-        False, ProvisionStatus.isFailed(ProvisionStatus.FUSEATTR_ING))
+        False, ProvisionStatus.isFailed(ProvisionStatus.FUSEATTR_IN_PROGRESS))
     self.assertEqual(
         False, ProvisionStatus.isSuccess(ProvisionStatus.PROVISION_FAILED))
     self.assertEqual(
@@ -530,91 +530,6 @@ class AtftManTest(unittest.TestCase):
     self.assertEqual(
         atft_manager.GetATFADevice().location, self.TEST_LOCATION)
     self.assertEqual(atft_manager.target_devs[0].location, self.TEST_LOCATION2)
-
-  # Test _SortTargetDevices
-  def testSortDevicesDefault(self):
-    mock_serial_mapper = MagicMock()
-    mock_serial_instance = MagicMock()
-    mock_serial_mapper.return_value = mock_serial_instance
-    smap = {
-        self.TEST_SERIAL: self.TEST_LOCATION,
-        self.TEST_SERIAL2: self.TEST_LOCATION2,
-        self.TEST_SERIAL3: self.TEST_LOCATION3
-    }
-    mock_serial_instance.refresh_serial_map.side_effect = (
-        lambda serial_map=smap: self.mockSetSerialMapper(serial_map))
-    mock_serial_instance.get_location.side_effect = self.mockGetLocation
-    mock_fastboot = MagicMock()
-    mock_fastboot.side_effect = self.MockInit
-    atft_manager = atftman.AtftManager(
-        mock_fastboot, mock_serial_mapper, self.configs)
-    mock_fastboot.ListDevices.return_value = [
-        self.TEST_SERIAL, self.TEST_SERIAL2, self.TEST_SERIAL3
-    ]
-    atft_manager.ListDevices()
-    atft_manager.ListDevices()
-    self.assertEqual(3, len(atft_manager.target_devs))
-    self.assertEqual(self.TEST_LOCATION, atft_manager.target_devs[0].location)
-    self.assertEqual(self.TEST_LOCATION3, atft_manager.target_devs[1].location)
-    self.assertEqual(self.TEST_LOCATION2, atft_manager.target_devs[2].location)
-
-  def testSortDevicesLocation(self):
-    mock_serial_mapper = MagicMock()
-    mock_serial_instance = MagicMock()
-    mock_serial_mapper.return_value = mock_serial_instance
-    smap = {
-        self.TEST_SERIAL: self.TEST_LOCATION,
-        self.TEST_SERIAL2: self.TEST_LOCATION2,
-        self.TEST_SERIAL3: self.TEST_LOCATION3
-    }
-    mock_serial_instance.refresh_serial_map.side_effect = (
-        lambda serial_map=smap: self.mockSetSerialMapper(serial_map))
-    mock_serial_instance.get_location.side_effect = self.mockGetLocation
-    mock_fastboot = MagicMock()
-    mock_fastboot.side_effect = self.MockInit
-    atft_manager = atftman.AtftManager(
-        mock_fastboot, mock_serial_mapper, self.configs)
-    mock_fastboot.ListDevices.return_value = [
-        self.TEST_SERIAL, self.TEST_SERIAL2, self.TEST_SERIAL3
-    ]
-    atft_manager.ListDevices(atft_manager.SORT_BY_LOCATION)
-    atft_manager.ListDevices(atft_manager.SORT_BY_LOCATION)
-    self.assertEqual(3, len(atft_manager.target_devs))
-    self.assertEqual(self.TEST_LOCATION, atft_manager.target_devs[0].location)
-    self.assertEqual(self.TEST_LOCATION3, atft_manager.target_devs[1].location)
-    self.assertEqual(self.TEST_LOCATION2, atft_manager.target_devs[2].location)
-
-  def testSortDevicesSerial(self):
-    mock_serial_mapper = MagicMock()
-    mock_serial_instance = MagicMock()
-    mock_serial_mapper.return_value = mock_serial_instance
-    smap = {
-        self.TEST_SERIAL: self.TEST_LOCATION,
-        self.TEST_SERIAL2: self.TEST_LOCATION2,
-        self.TEST_SERIAL3: self.TEST_LOCATION3
-    }
-    mock_serial_instance.refresh_serial_map.side_effect = (
-        lambda serial_map=smap: self.mockSetSerialMapper(serial_map))
-    mock_serial_instance.get_location.side_effect = self.mockGetLocation
-    mock_fastboot = MagicMock()
-    mock_fastboot_instance = MagicMock()
-    mock_fastboot.side_effect = self.MockInit
-    mock_fastboot.return_value = mock_fastboot_instance
-    mock_fastboot_instance.GetVar = MagicMock()
-    atft_manager = atftman.AtftManager(
-        mock_fastboot, mock_serial_mapper, self.configs)
-    mock_fastboot.ListDevices.return_value = [
-        self.TEST_SERIAL2, self.TEST_SERIAL3, self.TEST_SERIAL
-    ]
-    atft_manager.ListDevices(atft_manager.SORT_BY_SERIAL)
-    atft_manager.ListDevices(atft_manager.SORT_BY_SERIAL)
-    self.assertEqual(3, len(atft_manager.target_devs))
-    self.assertEqual(self.TEST_SERIAL,
-                     atft_manager.target_devs[0].serial_number)
-    self.assertEqual(self.TEST_SERIAL2,
-                     atft_manager.target_devs[1].serial_number)
-    self.assertEqual(self.TEST_SERIAL3,
-                     atft_manager.target_devs[2].serial_number)
 
   # Test AtftManager.TransferContent
 
@@ -1649,10 +1564,10 @@ class AtftManTest(unittest.TestCase):
 
     atft_manager.Reboot(test_device, timeout, mock_success, mock_fail)
 
-    # During the reboot, the status should be REBOOT_ING.
+    # During the reboot, the status should be REBOOT_IN_PROGRESS.
     self.assertEqual(1, len(atft_manager.target_devs))
     self.assertEqual(
-        ProvisionStatus.REBOOT_ING,
+        ProvisionStatus.REBOOT_IN_PROGRESS,
         atft_manager.target_devs[0].provision_status)
     self.assertEqual(
         self.TEST_SERIAL, atft_manager.target_devs[0].serial_number)
