@@ -330,8 +330,11 @@ class AtftTest(TestCase):
     mock_atft.atft_manager.product_info = MagicMock()
     mock_atft.atft_manager.GetCachedATFAKeysLeft.return_value = 10
     mock_atft.PrintToCommandWindow = MagicMock()
+    mock_atft.ShowAlert = MagicMock()
+    mock_atft.autoprov_button = MagicMock()
     mock_atft.OnEnterAutoProv()
     self.assertEqual(True, mock_atft.auto_prov)
+    mock_atft.ShowAlert.assert_not_called()
 
   def testOnEnterAutoProvNoAtfa(self):
     # Cannot enter auto provisioning mode without an ATFA device
@@ -343,8 +346,11 @@ class AtftTest(TestCase):
     mock_atft.atft_manager.product_info = MagicMock()
     mock_atft.atft_manager.GetCachedATFAKeysLeft.return_value = 10
     mock_atft.PrintToCommandWindow = MagicMock()
+    mock_atft.ShowAlert = MagicMock()
+    mock_atft.autoprov_button = MagicMock()
     mock_atft.OnEnterAutoProv()
     self.assertEqual(False, mock_atft.auto_prov)
+    mock_atft.ShowAlert.assert_called_once()
 
   def testOnEnterAutoProvNoProduct(self):
     # Cannot enter auto provisioning mode without a product
@@ -357,8 +363,11 @@ class AtftTest(TestCase):
     mock_atft.atft_manager.som_info = None
     mock_atft.atft_manager.GetCachedATFAKeysLeft.return_value = 10
     mock_atft.PrintToCommandWindow = MagicMock()
+    mock_atft.ShowAlert = MagicMock()
+    mock_atft.autoprov_button = MagicMock()
     mock_atft.OnEnterAutoProv()
     self.assertEqual(False, mock_atft.auto_prov)
+    mock_atft.ShowAlert.assert_called_once()
 
   def testOnEnterAutoProvNoKeysLeft(self):
     # Cannot enter auto provisioning mode when no keys left
@@ -370,8 +379,11 @@ class AtftTest(TestCase):
     mock_atft.atft_manager.product_info = MagicMock()
     mock_atft.atft_manager.GetCachedATFAKeysLeft.return_value = 0
     mock_atft.PrintToCommandWindow = MagicMock()
+    mock_atft.ShowAlert = MagicMock()
+    mock_atft.autoprov_button = MagicMock()
     mock_atft.OnEnterAutoProv()
     self.assertEqual(False, mock_atft.auto_prov)
+    mock_atft.ShowAlert.assert_called_once()
 
   # Test atft.OnLeaveAutoProv
   def testLeaveAutoProvNormal(self):
