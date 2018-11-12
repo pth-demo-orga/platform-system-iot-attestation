@@ -63,7 +63,7 @@ class MockAtft(atft.Atft):
     self._CreateThread = self._MockCreateThread
     self.TARGET_DEV_SIZE = 6
     self.atft_string = MagicMock()
-    self.target_dev_components = MagicMock()
+    self.target_devs_components = MagicMock()
     atft.Atft.__init__(self)
     self.provision_steps = self.DEFAULT_PROVISION_STEPS_PRODUCT
 
@@ -79,6 +79,7 @@ class MockAtft(atft.Atft):
     self.reboot_timeout = 1.0
     self.product_attribute_file_extension = '*.atpa'
     self.key_dir = 'test_key_dir'
+    self.mapping_mode = self.MULTIPLE_DEVICE_MODE
 
     return {}
 
@@ -179,16 +180,20 @@ class AtftTest(TestCase):
     mock_atft._DeviceListedEventHandler(None)
     mock_atft._PrintTargetDevices.assert_called_once()
 
-  # Test _PrintTargetDevices
-  def testPrintTargetDevices(self):
+  def testPrintTargetDevicesMultipleDeviceMode(self):
+      # Test _PrintTargetDevices in multiple device mode.
     mock_atft = MockAtft()
     mock_serial_string = MagicMock()
     mock_atft.atft_string.FIELD_SERIAL_NUMBER = mock_serial_string
     mock_atft.atft_manager = MagicMock()
+    mock_dev_components = []
+    for i in range(0, 6):
+        mock_dev_components.append(MagicMock())
+    mock_atft.target_devs_components = mock_dev_components;
     dev1 = self.test_dev1
     dev2 = self.test_dev2
     dev1.provision_status = ProvisionStatus.IDLE
-    dev2.provision_status = ProvisionStatus.PROVISION_ING
+    dev2.provision_status = ProvisionStatus.REBOOT_IN_PROGRESS
     dev1_state = ProvisionState()
     dev1.provision_state = dev1_state
     dev2_state = ProvisionState()
@@ -200,22 +205,71 @@ class AtftTest(TestCase):
     mock_atft.device_usb_locations = []
     for i in range(mock_atft.TARGET_DEV_SIZE):
       mock_atft.device_usb_locations.append(None)
+    # Two target devices at location 0 and location 5.
     mock_atft.device_usb_locations[0] = self.TEST_LOCATION1
     mock_atft.device_usb_locations[5] = self.TEST_LOCATION2
     mock_atft._ShowTargetDevice = MagicMock()
     mock_atft._PrintTargetDevices()
     mock_atft._ShowTargetDevice.assert_has_calls([
         call(
-            0, self.TEST_SERIAL1, mock_serial_string + ': ' +
-            self.TEST_SERIAL1, ProvisionStatus.IDLE, dev1_state),
-        call(1, None, '', None, None),
-        call(2, None, '', None, None),
-        call(3, None, '', None, None),
-        call(4, None, '', None, None),
+            mock_dev_components[0],
+            self.TEST_SERIAL1,
+            '{}: {}'.format(mock_serial_string, self.TEST_SERIAL1),
+            ProvisionStatus.IDLE, dev1_state),
+        call(mock_dev_components[1], None, '', None, None),
+        call(mock_dev_components[2], None, '', None, None),
+        call(mock_dev_components[3], None, '', None, None),
+        call(mock_dev_components[4], None, '', None, None),
         call(
-            5, self.TEST_SERIAL2, mock_serial_string + ': ' +
-            self.TEST_SERIAL2, ProvisionStatus.PROVISION_ING, dev2_state)
+            mock_dev_components[5], self.TEST_SERIAL2,
+            '{}: {}'.format(mock_serial_string, self.TEST_SERIAL2),
+            ProvisionStatus.REBOOT_IN_PROGRESS, dev2_state)
         ])
+
+  def testPrintTargetDevicesSingleDeviceMode(self):
+    # Test _PrintTargetDevices in single device mode.
+    mock_atft = MockAtft()
+    mock_atft.mapping_mode = mock_atft.SINGLE_DEVICE_MODE
+
+    mock_serial_string = MagicMock()
+    mock_atft.atft_string.FIELD_SERIAL_NUMBER = mock_serial_string
+    mock_atft.atft_manager = MagicMock()
+    def mockGetTargetDevice(serial):
+      for device in mock_atft.atft_manager.target_devs:
+        if device.serial_number == serial:
+          return device
+      return None
+    mock_atft.atft_manager.GetTargetDevice.side_effect = mockGetTargetDevice
+    mock_component = MagicMock()
+    mock_atft.unmapped_target_dev_component = mock_component
+    dev1 = self.test_dev1
+    dev2 = self.test_dev2
+    dev1.provision_status = ProvisionStatus.IDLE
+    dev2.provision_status = ProvisionStatus.PROVISION_IN_PROGRESS
+    dev1_state = ProvisionState()
+    dev1.provision_state = dev1_state
+    dev2_state = ProvisionState()
+    dev2_state.bootloader_locked = True
+    dev2_state.avb_perm_attr_set = True
+    dev2_state.avb_locked = True
+    dev2.provision_state = dev2_state
+
+    # No target device.
+    mock_atft.atft_manager.target_devs = []
+    mock_atft._ShowTargetDevice = MagicMock()
+    mock_atft._PrintTargetDevices()
+    mock_atft._ShowTargetDevice.assert_called_once_with(
+        mock_component, None, '', None, None)
+    mock_atft._ShowTargetDevice.reset_mock()
+
+    # Multiple target devices in single device mode, show the first device.
+    mock_atft.atft_manager.target_devs = [dev1, dev2]
+    mock_atft._ShowTargetDevice = MagicMock()
+    mock_atft._PrintTargetDevices()
+    mock_atft._ShowTargetDevice.assert_called_once_with(
+        mock_component, self.TEST_SERIAL1,
+        '{}: {}'.format(mock_serial_string, self.TEST_SERIAL1),
+        ProvisionStatus.IDLE, dev1_state)
 
   # Test atft._SelectFileEventHandler
   @patch('wx.FileDialog')
@@ -403,8 +457,8 @@ class AtftTest(TestCase):
     test_dev2 = TestDeviceInfo(
         self.TEST_SERIAL2, self.TEST_LOCATION1,
         ProvisionStatus.WAITING)
-    mock_atft._GetTargetDevices = MagicMock()
-    mock_atft._GetTargetDevices.return_value = [
+    mock_atft._GetAvailableDevices = MagicMock()
+    mock_atft._GetAvailableDevices.return_value = [
         test_dev1, test_dev2]
     mock_atft.atft_manager.CheckProvisionStatus.side_effect = (
         lambda target=test_dev2, state=ProvisionStatus.LOCKAVB_SUCCESS:
@@ -462,8 +516,8 @@ class AtftTest(TestCase):
     test_dev1.provision_state.product_provisioned = True
     test_dev2 = TestDeviceInfo(self.TEST_SERIAL2, self.TEST_LOCATION1,
                                ProvisionStatus.IDLE)
-    mock_atft._GetTargetDevices = MagicMock()
-    mock_atft._GetTargetDevices.return_value = [
+    mock_atft._GetAvailableDevices = MagicMock()
+    mock_atft._GetAvailableDevices.return_value = [
         test_dev1, test_dev2]
     mock_atft._CreateThread = MagicMock()
     mock_atft._HandleStateTransition = MagicMock()
@@ -769,7 +823,7 @@ class AtftTest(TestCase):
   def mockDeviceFuseVbootFailed(self, target, auto_prov):
     # After reboot, the device disappear.
     self.target_device_fuse_failed = True
-    target.provision_status = ProvisionStatus.REBOOT_ING
+    target.provision_status = ProvisionStatus.REBOOT_IN_PROGRESS
 
   # Test fuse vboot key change target device state by creating a new target
   # device instead of modifying the original one's state.
@@ -803,8 +857,8 @@ class AtftTest(TestCase):
             dev))
     mock_atft._HandleStateTransition(test_dev1)
 
-    # The old target device is still in REBOOT_ING state.
-    self.assertEqual(ProvisionStatus.REBOOT_ING, test_dev1.provision_status)
+    # The old target device is still in REBOOT_IN_PROGRESS state.
+    self.assertEqual(ProvisionStatus.REBOOT_IN_PROGRESS, test_dev1.provision_status)
 
     # The new device is in FUSEVBOOT_FAILED state
     self.assertEqual(
@@ -1622,8 +1676,8 @@ class AtftTest(TestCase):
     # We are operating with product key.
     mock_atft.atft_manager.product_info = MagicMock()
     mock_atft.atft_manager.som_info = None
-    mock_atft._ShowWarning = MagicMock()
-    mock_atft._ShowWarning.return_value = False
+    mock_atft.ShowWarning = MagicMock()
+    mock_atft.ShowWarning.return_value = False
     mock_atft.OnManualProvision(None)
     calls = [call(test_dev1, False), call(test_dev2, False)]
     mock_atft.atft_manager.Provision.assert_has_calls(calls)
@@ -1678,44 +1732,44 @@ class AtftTest(TestCase):
     mock_atft._GetSelectedSerials.return_value = serials
     mock_atft.atft_manager.GetATFADevice = MagicMock()
     mock_atft.atft_manager.GetATFADevice.return_value = MagicMock()
-    mock_atft._ShowWarning = MagicMock()
+    mock_atft.ShowWarning = MagicMock()
     # We are operating with product key.
     mock_atft.atft_manager.product_info = MagicMock()
     mock_atft.atft_manager.som_info = None
 
     # User click No for reprovision.
-    mock_atft._ShowWarning.return_value = False
+    mock_atft.ShowWarning.return_value = False
     mock_atft.OnManualProvision(None)
     mock_atft.atft_manager.Provision.assert_called_once_with(test_dev1, False)
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
 
     # User click yes.
-    mock_atft._ShowWarning.reset_mock()
+    mock_atft.ShowWarning.reset_mock()
     mock_atft.atft_manager.Provision.reset_mock()
-    mock_atft._ShowWarning.return_value = True
+    mock_atft.ShowWarning.return_value = True
     mock_atft.OnManualProvision(None)
     calls = [call(test_dev1, False), call(test_dev2, False)]
     mock_atft.atft_manager.Provision.assert_has_calls(calls)
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
 
     # Now operating in som mode
-    mock_atft._ShowWarning.reset_mock()
+    mock_atft.ShowWarning.reset_mock()
     mock_atft.atft_manager.Provision.reset_mock()
     mock_atft.atft_manager.product_info = None
     mock_atft.atft_manager.som_info = MagicMock()
     mock_atft._GetSelectedSerials.return_value = [self.TEST_SERIAL3]
     # User click No for reprovision.
-    mock_atft._ShowWarning.return_value = False
+    mock_atft.ShowWarning.return_value = False
     mock_atft.OnManualProvision(None)
     mock_atft.atft_manager.Provision.assert_not_called()
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
     # User click yes.
-    mock_atft._ShowWarning.reset_mock()
+    mock_atft.ShowWarning.reset_mock()
     mock_atft.atft_manager.Provision.reset_mock()
-    mock_atft._ShowWarning.return_value = True
+    mock_atft.ShowWarning.return_value = True
     mock_atft.OnManualProvision(None)
     mock_atft.atft_manager.Provision.assert_called_with(test_dev2, True)
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
 
   def testManualProvisionExceptions(self):
     mock_atft = MockAtft()
@@ -1751,7 +1805,7 @@ class AtftTest(TestCase):
     mock_atft._GetSelectedSerials.return_value = serials
     mock_atft.atft_manager.GetATFADevice = MagicMock()
     mock_atft.atft_manager.GetATFADevice.return_value = MagicMock()
-    mock_atft._ShowWarning = MagicMock()
+    mock_atft.ShowWarning = MagicMock()
     mock_atft.atft_manager.Provision.side_effect = (
         fastboot_exceptions.FastbootFailure(''))
     mock_atft.OnManualProvision(None)
@@ -2319,8 +2373,8 @@ class AtftTest(TestCase):
   def testSaveFileEventFileExists(
       self, mock_create_dialog):
     mock_atft = MockAtft()
-    mock_atft._ShowWarning = MagicMock()
-    mock_atft._ShowWarning.return_value = True
+    mock_atft.ShowWarning = MagicMock()
+    mock_atft.ShowWarning.return_value = True
     message = self.TEST_TEXT
     filename = self.TEST_FILENAME
     callback = MagicMock()
@@ -2338,12 +2392,12 @@ class AtftTest(TestCase):
     event = MagicMock()
     event.GetValue.return_value = data
     mock_atft._SaveFileEventHandler(event)
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
     callback.assert_called_once()
 
     # If use clicks no to the warning.
     callback.reset_mock()
-    mock_atft._ShowWarning.return_value = False
+    mock_atft.ShowWarning.return_value = False
     mock_atft._SaveFileEventHandler(event)
     callback.assert_not_called()
 
@@ -2766,7 +2820,7 @@ class AtftTest(TestCase):
     mock_atft.atft_manager = MagicMock()
     mock_atft.SendUpdateMappingEvent = MagicMock()
     mock_atft._SendAlertEvent = MagicMock()
-    mock_atft._ShowWarning = MagicMock()
+    mock_atft.ShowWarning = MagicMock()
     mock_device_1 = MagicMock()
     mock_device_1.location = self.TEST_LOCATION1
     mock_device_2 = MagicMock()
@@ -2775,7 +2829,7 @@ class AtftTest(TestCase):
     # Normal case: two target devices. No initial state.
     mock_atft.atft_manager.target_devs = [mock_device_1, mock_device_2]
     mock_atft.AutoMapUSBLocationToSlot(MagicMock())
-    mock_atft._ShowWarning.assert_not_called()
+    mock_atft.ShowWarning.assert_not_called()
     mock_atft._SendAlertEvent.assert_not_called()
     mock_atft.SendUpdateMappingEvent.assert_called_once()
     for i in range(mock_atft.TARGET_DEV_SIZE):
@@ -2790,10 +2844,10 @@ class AtftTest(TestCase):
     # previous configure.
     mock_atft.SendUpdateMappingEvent.reset_mock()
     mock_atft.atft_manager.target_devs = [mock_device_2, mock_device_1]
-    mock_atft._ShowWarning.return_value = True
+    mock_atft.ShowWarning.return_value = True
     mock_atft.AutoMapUSBLocationToSlot(MagicMock())
     mock_atft._SendAlertEvent.assert_not_called()
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
     mock_atft.SendUpdateMappingEvent.assert_called_once()
     for i in range(mock_atft.TARGET_DEV_SIZE):
       if i == 0:
@@ -2805,11 +2859,11 @@ class AtftTest(TestCase):
 
     # Remove one target device, remap.
     mock_atft.SendUpdateMappingEvent.reset_mock()
-    mock_atft._ShowWarning.reset_mock()
+    mock_atft.ShowWarning.reset_mock()
     mock_atft.atft_manager.target_devs = [mock_device_1]
     mock_atft.AutoMapUSBLocationToSlot(MagicMock())
     mock_atft._SendAlertEvent.assert_not_called()
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
     mock_atft.SendUpdateMappingEvent.assert_called_once()
     for i in range(mock_atft.TARGET_DEV_SIZE):
       if i == 0:
@@ -2819,12 +2873,12 @@ class AtftTest(TestCase):
 
     # Remap, however, user click no for remapping.
     mock_atft.SendUpdateMappingEvent.reset_mock()
-    mock_atft._ShowWarning.reset_mock()
-    mock_atft._ShowWarning.return_value = False
+    mock_atft.ShowWarning.reset_mock()
+    mock_atft.ShowWarning.return_value = False
     mock_atft.atft_manager.target_devs = [mock_device_1, mock_device_2]
     mock_atft.AutoMapUSBLocationToSlot(MagicMock())
     mock_atft._SendAlertEvent.assert_not_called()
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
     mock_atft.SendUpdateMappingEvent.assert_not_called()
     for i in range(mock_atft.TARGET_DEV_SIZE):
       if i == 0:
@@ -2834,12 +2888,12 @@ class AtftTest(TestCase):
 
     # Remap, however, no target device.
     mock_atft.SendUpdateMappingEvent.reset_mock()
-    mock_atft._ShowWarning.reset_mock()
-    mock_atft._ShowWarning.return_value = True
+    mock_atft.ShowWarning.reset_mock()
+    mock_atft.ShowWarning.return_value = True
     mock_atft.atft_manager.target_devs = []
     mock_atft.AutoMapUSBLocationToSlot(MagicMock())
     mock_atft._SendAlertEvent.assert_called()
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
     mock_atft.SendUpdateMappingEvent.assert_not_called()
     for i in range(mock_atft.TARGET_DEV_SIZE):
       if i == 0:
@@ -2855,7 +2909,7 @@ class AtftTest(TestCase):
     mock_atft.atft_manager = MagicMock()
     mock_atft.SendUpdateMappingEvent = MagicMock()
     mock_atft._SendAlertEvent = MagicMock()
-    mock_atft._ShowWarning = MagicMock()
+    mock_atft.ShowWarning = MagicMock()
     mock_device_1 = MagicMock()
     mock_device_1.location = self.TEST_LOCATION1
     mock_device_2 = MagicMock()
@@ -2871,7 +2925,7 @@ class AtftTest(TestCase):
     mock_atft.app_settings_dialog.dev_mapping_components = [mock_dev_components]
     mock_atft.atft_manager.target_devs = [mock_device_1]
     mock_atft.ManualMapUSBLocationToSlot(MagicMock())
-    mock_atft._ShowWarning.assert_not_called()
+    mock_atft.ShowWarning.assert_not_called()
     mock_atft._SendAlertEvent.assert_not_called()
     mock_atft.SendUpdateMappingEvent.assert_called_once()
     for i in range(mock_atft.TARGET_DEV_SIZE):
@@ -2885,7 +2939,7 @@ class AtftTest(TestCase):
     mock_dev_components.index = 1
     mock_atft.atft_manager.target_devs = [mock_device_2]
     mock_atft.ManualMapUSBLocationToSlot(MagicMock())
-    mock_atft._ShowWarning.assert_not_called()
+    mock_atft.ShowWarning.assert_not_called()
     mock_atft._SendAlertEvent.assert_not_called()
     mock_atft.SendUpdateMappingEvent.assert_called_once()
     for i in range(mock_atft.TARGET_DEV_SIZE):
@@ -2897,14 +2951,14 @@ class AtftTest(TestCase):
         self.assertEqual(None, mock_atft.device_usb_locations[i])
 
     # Remap slot 0 to target 3
-    mock_atft._ShowWarning = MagicMock()
-    mock_atft._ShowWarning.return_value = True
+    mock_atft.ShowWarning = MagicMock()
+    mock_atft.ShowWarning.return_value = True
     mock_atft.SendUpdateMappingEvent.reset_mock()
     mock_dev_components.index = 0
     mock_atft.atft_manager.target_devs = [mock_device_3]
     mock_atft.ManualMapUSBLocationToSlot(MagicMock())
     # Show a warning for remapping.
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
     mock_atft._SendAlertEvent.assert_not_called()
     mock_atft.SendUpdateMappingEvent.assert_called_once()
     for i in range(mock_atft.TARGET_DEV_SIZE):
@@ -2916,14 +2970,14 @@ class AtftTest(TestCase):
         self.assertEqual(None, mock_atft.device_usb_locations[i])
 
     # Remap slot 0 to target 1, however, this time, user clicks no.
-    mock_atft._ShowWarning = MagicMock()
-    mock_atft._ShowWarning.return_value = False
+    mock_atft.ShowWarning = MagicMock()
+    mock_atft.ShowWarning.return_value = False
     mock_atft.SendUpdateMappingEvent.reset_mock()
     mock_dev_components.index = 0
     mock_atft.atft_manager.target_devs = [mock_device_1]
     mock_atft.ManualMapUSBLocationToSlot(MagicMock())
     # Show a warning for remapping.
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
     mock_atft._SendAlertEvent.assert_not_called()
     mock_atft.SendUpdateMappingEvent.assert_not_called()
     for i in range(mock_atft.TARGET_DEV_SIZE):
@@ -2936,14 +2990,14 @@ class AtftTest(TestCase):
 
     # Remap slot 2 to target 3, show a warning because this would clear the map
     # for slot 0.
-    mock_atft._ShowWarning = MagicMock()
-    mock_atft._ShowWarning.return_value = True
+    mock_atft.ShowWarning = MagicMock()
+    mock_atft.ShowWarning.return_value = True
     mock_atft.SendUpdateMappingEvent.reset_mock()
     mock_dev_components.index = 2
     mock_atft.atft_manager.target_devs = [mock_device_3]
     mock_atft.ManualMapUSBLocationToSlot(MagicMock())
     # Show a warning for remapping.
-    mock_atft._ShowWarning.assert_called_once()
+    mock_atft.ShowWarning.assert_called_once()
     mock_atft._SendAlertEvent.assert_not_called()
     mock_atft.SendUpdateMappingEvent.assert_called_once()
     for i in range(mock_atft.TARGET_DEV_SIZE):
@@ -3125,6 +3179,134 @@ class AtftTest(TestCase):
     # Clear fake fs state
     shutil.rmtree(self.KEY_DIR)
     shutil.rmtree(self.LOG_DIR)
+
+  def testGetAvailableDevicesSingleDeviceMode(self):
+    # Test Atft._GetAvailableDevices in single device mode.
+    mock_atft = MockAtft()
+    mock_atft.mapping_mode = mock_atft.SINGLE_DEVICE_MODE
+    mock_atft.atft_manager = MagicMock()
+    test_dev1 = self.test_dev1
+    test_dev2 = self.test_dev2
+    mock_atft.atft_manager.target_devs = [test_dev2]
+    mock_atft.unmapped_target_dev_component = MagicMock()
+    mock_atft.unmapped_target_dev_component.serial_number = None
+
+    def mockGetTargetDevice(serial):
+      for device in mock_atft.atft_manager.target_devs:
+        if device.serial_number == serial:
+          return device
+      return None
+    mock_atft.atft_manager.GetTargetDevice.side_effect = mockGetTargetDevice
+
+    # Regular case, should return test_dev2
+    target_devs = mock_atft._GetAvailableDevices();
+    self.assertEqual(1, len(target_devs));
+    self.assertEqual(test_dev2, target_devs[0])
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    self.assertEqual(1, len(displayed_devs));
+    self.assertEqual(test_dev2, displayed_devs[0])
+
+    # Now displaying test_dev2
+    mock_atft.unmapped_target_dev_component.serial_number = self.TEST_SERIAL2
+    # Assume we find a new device test_dev1
+    mock_atft.atft_manager.target_devs = [test_dev1, test_dev2]
+    # We should still display test_dev2 to be consistent
+    target_devs = mock_atft._GetAvailableDevices();
+    self.assertEqual(1, len(target_devs));
+    self.assertEqual(test_dev2, target_devs[0])
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    self.assertEqual(1, len(displayed_devs));
+    self.assertEqual(test_dev2, displayed_devs[0])
+
+    # If test_dev2 disappear, then we should display test_dev1.
+    mock_atft.atft_manager.target_devs = [test_dev1]
+    target_devs = mock_atft._GetAvailableDevices();
+    self.assertEqual(1, len(target_devs));
+    self.assertEqual(test_dev1, target_devs[0])
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    self.assertEqual(1, len(displayed_devs));
+    self.assertEqual(test_dev1, displayed_devs[0])
+    mock_atft.unmapped_target_dev_component.serial_number = self.TEST_SERIAL1
+
+    # Now test_dev1 is rebooting, should ignore rebooting device.
+    test_dev1.provision_status = ProvisionStatus.REBOOT_IN_PROGRESS
+    target_devs = mock_atft._GetAvailableDevices()
+    self.assertEqual(0, len(target_devs))
+    # However, rebooting device should still be displayed:
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    self.assertEqual(1, len(displayed_devs));
+    self.assertEqual(test_dev1, displayed_devs[0])
+
+    # After reboot, it should become available again.
+    test_dev1.provision_status = ProvisionStatus.REBOOT_SUCCESS
+    target_devs = mock_atft._GetAvailableDevices();
+    self.assertEqual(1, len(target_devs));
+    self.assertEqual(test_dev1, target_devs[0])
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    self.assertEqual(1, len(displayed_devs));
+    self.assertEqual(test_dev1, displayed_devs[0])
+
+    # No target device.
+    mock_atft.atft_manager.target_devs = []
+    target_devs = mock_atft._GetAvailableDevices();
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    self.assertEqual(0, len(target_devs))
+    self.assertEqual(0, len(displayed_devs))
+
+  def testGetAvailableDevicesMultipleDeviceMode(self):
+    # Test Atft._GetAvailableDevices in multiple device mode.
+    mock_atft = MockAtft()
+    mock_atft.mapping_mode = mock_atft.MULTIPLE_DEVICE_MODE
+    mock_atft.atft_manager = MagicMock()
+    test_dev1 = TestDeviceInfo(
+        self.TEST_SERIAL1, self.TEST_LOCATION1, ProvisionStatus.IDLE)
+    test_dev2 = TestDeviceInfo(
+        self.TEST_SERIAL2, self.TEST_LOCATION2, ProvisionStatus.IDLE)
+    test_dev3 = TestDeviceInfo(
+        self.TEST_SERIAL3, self.TEST_LOCATION3, ProvisionStatus.IDLE)
+    mock_atft.atft_manager.target_devs = [test_dev1, test_dev2, test_dev3]
+    # test_dev3 is not mapped to any location.
+    mock_atft.device_usb_locations = [
+        self.TEST_LOCATION1, self.TEST_LOCATION2, None, None, None, None]
+
+    # Regular case, should return test_dev1 and test_dev2
+    target_devs = mock_atft._GetAvailableDevices();
+    self.assertEqual(2, len(target_devs));
+    self.assertEqual(test_dev1, target_devs[0])
+    self.assertEqual(test_dev2, target_devs[1])
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    self.assertEqual(2, len(displayed_devs));
+    self.assertEqual(test_dev1, displayed_devs[0])
+    self.assertEqual(test_dev2, displayed_devs[1])
+
+    # Now test_dev1 is rebooting, should ignore rebooting device.
+    test_dev1.provision_status = ProvisionStatus.REBOOT_IN_PROGRESS
+    target_devs = mock_atft._GetAvailableDevices()
+    self.assertEqual(1, len(target_devs));
+    self.assertEqual(test_dev2, target_devs[0])
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    # However, rebooting device should still be displayed:
+    self.assertEqual(2, len(displayed_devs));
+    self.assertEqual(test_dev1, displayed_devs[0])
+    self.assertEqual(test_dev2, displayed_devs[1])
+
+    # After reboot, it should become available again.
+    test_dev1.provision_status = ProvisionStatus.REBOOT_SUCCESS
+    target_devs = mock_atft._GetAvailableDevices();
+    self.assertEqual(2, len(target_devs));
+    self.assertEqual(test_dev1, target_devs[0])
+    self.assertEqual(test_dev2, target_devs[1])
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    self.assertEqual(2, len(displayed_devs));
+    self.assertEqual(test_dev1, displayed_devs[0])
+    self.assertEqual(test_dev2, displayed_devs[1])
+
+    # No target device.
+    mock_atft.atft_manager.target_devs = []
+    target_devs = mock_atft._GetAvailableDevices();
+    displayed_devs = mock_atft._GetDisplayedDevices()
+    self.assertEqual(0, len(target_devs))
+    self.assertEqual(0, len(displayed_devs))
 
 
 if __name__ == '__main__':
