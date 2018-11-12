@@ -2585,7 +2585,7 @@ class AtftTest(TestCase):
     self.assertEqual(True, os.path.exists(self.AUDIT_DIR))
     test_audit.PullAudit(10)
     get_file_handler.assert_called_once_with(
-        audit_file_path_0, 'audit', False, True)
+        audit_file_path_0, 'audit', False, False)
     get_file_handler.reset_mock()
     self.assertEqual(True, os.path.isfile(audit_file_path_0))
 
@@ -2595,7 +2595,7 @@ class AtftTest(TestCase):
 
     test_audit.PullAudit(8)
     get_file_handler.assert_called_once_with(
-        audit_file_path_1, 'audit', False, True)
+        audit_file_path_1, 'audit', False, False)
     self.assertEqual(False, os.path.isfile(audit_file_path_0))
     self.assertEqual(True, os.path.isfile(audit_file_path_1))
 
@@ -2607,7 +2607,7 @@ class AtftTest(TestCase):
 
     test_audit.PullAudit(6)
     get_file_handler.assert_called_once_with(
-        audit_file_path_2, 'audit', False, True)
+        audit_file_path_2, 'audit', False, False)
     get_file_handler.reset_mock()
     self.assertEqual(False, os.path.isfile(audit_file_path_1))
     self.assertEqual(True, os.path.isfile(audit_file_path_2))
@@ -2615,7 +2615,7 @@ class AtftTest(TestCase):
     test_audit.ResetKeysLeft()
     test_audit.PullAudit(10)
     get_file_handler.assert_called_once_with(
-        audit_file_path_3, 'audit', False, True)
+        audit_file_path_3, 'audit', False, False)
     self.assertEqual(False, os.path.isfile(audit_file_path_2))
     self.assertEqual(True, os.path.isfile(audit_file_path_3))
 
@@ -2660,7 +2660,7 @@ class AtftTest(TestCase):
         get_atfa_serial)
     test_audit.PullAudit(10)
     get_file_handler.assert_called_once_with(
-        audit_file_path_3, 'audit', False, True)
+        audit_file_path_3, 'audit', False, False)
     self.assertEqual(False, os.path.isfile(audit_file_path_0))
     self.assertEqual(False, os.path.isfile(audit_file_path_1))
     self.assertEqual(False, os.path.isfile(audit_file_path_2))
@@ -2707,7 +2707,7 @@ class AtftTest(TestCase):
         get_atfa_serial)
     test_audit.PullAudit(10)
     get_file_handler.assert_called_once_with(
-        audit_file_path_3, 'audit', False, True)
+        audit_file_path_3, 'audit', False, False)
     self.assertEqual(True, os.path.isfile(audit_file_path_0))
     self.assertEqual(True, os.path.isfile(audit_file_path_1))
     self.assertEqual(True, os.path.isfile(audit_file_path_2))
@@ -2746,7 +2746,7 @@ class AtftTest(TestCase):
         get_atfa_serial)
     test_audit.PullAudit(10)
     get_file_handler.assert_called_once_with(
-        audit_file_path_1_0, 'audit', False, True)
+        audit_file_path_1_0, 'audit', False, False)
     get_file_handler.reset_mock()
     self.assertEqual(True, os.path.isfile(audit_file_path_1_0))
 
@@ -2755,7 +2755,7 @@ class AtftTest(TestCase):
     get_atfa_serial.return_value = self.TEST_SERIAL2
     test_audit.PullAudit(10)
     get_file_handler.assert_called_once_with(
-        audit_file_path_2_1, 'audit', False, True)
+        audit_file_path_2_1, 'audit', False, False)
     get_file_handler.reset_mock()
     self.assertEqual(True, os.path.isfile(audit_file_path_1_0))
     self.assertEqual(True, os.path.isfile(audit_file_path_2_1))
@@ -2765,7 +2765,7 @@ class AtftTest(TestCase):
     get_atfa_serial.return_value = self.TEST_SERIAL1
     test_audit.PullAudit(9)
     get_file_handler.assert_called_once_with(
-        audit_file_path_1_2, 'audit', False, True)
+        audit_file_path_1_2, 'audit', False, False)
     get_file_handler.reset_mock()
     self.assertEqual(False, os.path.isfile(audit_file_path_1_0))
     self.assertEqual(True, os.path.isfile(audit_file_path_1_2))
@@ -2776,7 +2776,7 @@ class AtftTest(TestCase):
     get_atfa_serial.return_value = self.TEST_SERIAL2
     test_audit.PullAudit(9)
     get_file_handler.assert_called_once_with(
-        audit_file_path_2_3, 'audit', False, True)
+        audit_file_path_2_3, 'audit', False, False)
     get_file_handler.reset_mock()
     self.assertEqual(False, os.path.isfile(audit_file_path_1_0))
     self.assertEqual(True, os.path.isfile(audit_file_path_1_2))
