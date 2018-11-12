@@ -227,6 +227,7 @@ class AtftString(object):
     self.BUTTON_MAP = ['Map', '关联'][index]
     self.BUTTON_CANCEL = ['Cancel', '取消'][index]
     self.BUTTON_SAVE = ['Save', '保存'][index]
+    self.BUTTON_START_OPERATION = ['Start Operation', '开始'][index]
 
     # Alerts
     self.ALERT_NO_ATFA = [
@@ -238,6 +239,9 @@ class AtftString(object):
     self.ALERT_AUTO_PROV_NO_PRODUCT = [
         'Cannot enter auto provision mode\nNo product specified!',
         '无法开启自动模式\n没有选择产品！'][index]
+    self.ALERT_AUTO_PROV_NO_KEYS_LEFT = [
+        'Cannot enter auto provision mode\nNo keys left in ATFA!',
+        '无法开启自动模式\n没有剩余密钥！'][index]
     self.ALERT_PROV_NO_SELECTED = [
         "Can't Provision! No target device selected!",
         '无法传输密钥！目标设备没有选择！'][index]
@@ -2018,6 +2022,10 @@ class Atft(wx.Frame):
     self.Bind(wx.EVT_MENU, self._OnFocusTargetDevList, id=event_id)
     event_id = wx.NewId()
     accel_entries.append(
+        wx.AcceleratorEntry(wx.ACCEL_ALT, ord('O'), event_id))
+    self.Bind(wx.EVT_MENU, self.OnChangeAutoProv, id=event_id)
+    event_id = wx.NewId()
+    accel_entries.append(
         wx.AcceleratorEntry(wx.ACCEL_NORMAL, wx.WXK_TAB, event_id))
     self.Bind(wx.EVT_MENU, self._OnPressTab, id=event_id)
     event_id = wx.NewId()
@@ -2253,9 +2261,21 @@ class Atft(wx.Frame):
     self.target_devs_title.SetFont(target_dev_font)
     self.target_devs_title_sizer = wx.BoxSizer(wx.HORIZONTAL)
     self.target_devs_title_sizer.Add(self.target_devs_title, 0, wx.LEFT, 10)
-
+    auto_prov_button_font = wx.Font(
+        12, wx.FONTFAMILY_SWISS, wx.NORMAL, wx.FONTWEIGHT_NORMAL)
+    self.autoprov_button = wx.ToggleButton(
+        target_devs_panel, id=wx.ID_ANY,
+        label=self.atft_string.BUTTON_START_OPERATION)
+    self.autoprov_button.SetFont(auto_prov_button_font)
+    self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleAutoProv, self.autoprov_button)
+    # The vertical sizer to occupy all the right side space so that the button
+    # could align right.
+    right_sizer = wx.BoxSizer(wx.VERTICAL)
+    self.target_devs_title_sizer.Add(right_sizer, 1)
+    right_sizer.Add(
+        self.autoprov_button, 0, wx.ALIGN_RIGHT | wx.RIGHT, 25)
     target_devs_panel_sizer.Add(
-        self.target_devs_title_sizer, 0, wx.TOP | wx.BOTTOM, 10)
+        self.target_devs_title_sizer, 1, wx.TOP | wx.BOTTOM | wx.EXPAND, 10)
 
     self.target_dev_components = Atft.CreateTargetDeviceList(
         target_devs_panel, target_devs_panel_sizer)
@@ -2505,21 +2525,54 @@ class Atft(wx.Frame):
       return
     self._CreateThread(self._Shutdown)
 
+  def OnChangeAutoProv(self, event):
+    """Change the auto provisioning mode and the button status.
+
+    Args:
+      event: The triggering event.
+    """
+    if self.autoprov_button.GetValue():
+      self.autoprov_button.SetValue(False)
+    else:
+      self.autoprov_button.SetValue(True)
+    self.OnToggleAutoProv(None)
+
+  def OnToggleAutoProv(self, event):
+    """Toggle the auto provisioning mode.
+
+    Args:
+      event: The triggering event.
+    """
+    if self.autoprov_button.GetValue():
+      self.OnEnterAutoProv()
+    else:
+      self.OnLeaveAutoProv()
+
   def OnEnterAutoProv(self):
     """Enter auto provisioning mode."""
     if self.auto_prov:
       return
-    if (self.atft_manager.GetATFADevice() and
-        self._GetCachedATFAKeysLeft() > 0 and
-        (self.atft_manager.product_info or self.atft_manager.som_info)):
-      # If product info file is chosen and atfa device is present and there are
-      # keys left. Enter auto provisioning mode.
-      self.auto_prov = True
-      self.first_key_alert_shown = False
-      self.second_key_alert_shown = False
-      message = 'Automatic key provisioning start'
-      self.PrintToCommandWindow(message)
-      self.log.Info('Autoprov', message)
+    if not self.atft_manager.GetATFADevice() :
+      self.ShowAlert(self.atft_string.ALERT_AUTO_PROV_NO_ATFA)
+      self.autoprov_button.SetValue(False)
+      return
+    if not self.atft_manager.product_info and not self.atft_manager.som_info:
+      self.ShowAlert(self.atft_string.ALERT_AUTO_PROV_NO_PRODUCT)
+      self.autoprov_button.SetValue(False)
+      return
+    if not self._GetCachedATFAKeysLeft():
+      self.ShowAlert(self.atft_string.ALERT_AUTO_PROV_NO_KEYS_LEFT)
+      self.autoprov_button.SetValue(False)
+      return
+
+    # If product info file is chosen and atfa device is present and there are
+    # keys left. Enter auto provisioning mode.
+    self.auto_prov = True
+    self.first_key_alert_shown = False
+    self.second_key_alert_shown = False
+    message = 'Automatic key provisioning start'
+    self.PrintToCommandWindow(message)
+    self.log.Info('Autoprov', message)
 
   def OnLeaveAutoProv(self):
     """Leave auto provisioning mode."""
@@ -2580,7 +2633,7 @@ class Atft(wx.Frame):
         self.atft_string.BUTTON_ENTER_SUP_MODE)
     self.main_box.Hide(self.cmd_output_wrap)
     self.SetMenuBar(None)
-    self.OnEnterAutoProv()
+    self.autoprov_button.Show(True)
 
   def OnEnterSupMode(self):
     """Enter supervisor mode, ask for credential."""
@@ -2600,7 +2653,9 @@ class Atft(wx.Frame):
           self.atft_string.BUTTON_LEAVE_SUP_MODE)
       self.SetMenuBar(self.menubar)
       self.cmd_output_wrap.Show()
+      self.autoprov_button.SetValue(False)
       self.OnLeaveAutoProv()
+      self.autoprov_button.Show(False)
     else:
       e = PasswordErrorException()
       # Log the wrong password event.
@@ -3403,12 +3458,10 @@ class Atft(wx.Frame):
       if self.auto_prov and not self.atft_manager.GetATFADevice():
         # If ATFA unplugged during normal mode,
         # exit the mode with an alert.
+        self.autoprov_button.SetValue(False)
         self.OnLeaveAutoProv()
         # Add log here.
         self._SendAlertEvent('ATFA device unplugged, exit auto mode!')
-      if not self.auto_prov:
-        # If not already in auto provisioning mode, try enable it.
-        self.OnEnterAutoProv()
 
     # If in auto provisioning mode, handle the newly added devices.
     if self.auto_prov:
@@ -4130,6 +4183,7 @@ class Atft(wx.Frame):
         if self._GetCachedATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.atft_string.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
+          self.autoprov_button.SetValue(False)
           self.OnLeaveAutoProv()
         continue
       elif (not target.provision_state.som_provisioned and
@@ -4139,6 +4193,7 @@ class Atft(wx.Frame):
         if self._GetCachedATFAKeysLeft() == 0:
           # No keys left. If it's auto provisioning mode, exit.
           self._SendAlertEvent(self.atft_string.ALERT_NO_KEYS_LEFT_LEAVE_PROV)
+          self.autoprov_button.SetValue(False)
           self.OnLeaveAutoProv()
 
     if target and self._is_provision_steps_finished(target.provision_state):
