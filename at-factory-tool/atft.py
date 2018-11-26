@@ -59,6 +59,9 @@ elif sys.platform.startswith('win'):
   from serialmapperwin import SerialMapper
 
 
+# The current software version.
+VERSION = 3.0
+
 # colors
 COLOR_WHITE = wx.Colour(255, 255, 255)
 COLOR_RED = wx.Colour(192, 40, 40)
@@ -274,8 +277,9 @@ class AtftString(object):
         'Failed to create log!',
         '无法创建日志文件！'][index]
     self.ALERT_FAIL_TO_PARSE_CONFIG = [
-        'Failed to find or parse config file!',
-        '无法找到或解析配置文件！'][index]
+        'Failed to find or parse config file, please check your config file'
+        ' version!',
+        '无法找到或解析配置文件，请确认你的配置文件与软件版本一致！'][index]
     self.ALERT_NO_DEVICE = [
         'No devices found!',
         '无设备！'][index]
@@ -1457,7 +1461,7 @@ class Atft(wx.Frame):
 
     self.SetLanguage()
 
-    self.atft_string.TITLE += ' ' + self.atft_version
+    self.atft_string.TITLE += ' %s' % self.atft_version
 
     # The atft_manager instance to manage various operations.
     self.atft_manager = self.CreateAtftManager()
@@ -1515,6 +1519,10 @@ class Atft(wx.Frame):
 
     self.InitializeUI()
 
+    if self.configs == None:
+      self.ShowAlert(self.atft_string.ALERT_FAIL_TO_PARSE_CONFIG)
+      sys.exit(0)
+
     self.CreateShortCuts()
 
     self.log = self.CreateAtftLog()
@@ -1523,10 +1531,6 @@ class Atft(wx.Frame):
 
     self.key_handler = self.CreateAtftKeyHandler()
     self.key_handler.StartProcessKey()
-
-    if self.configs == None:
-      self.ShowAlert(self.atft_string.ALERT_FAIL_TO_PARSE_CONFIG)
-      sys.exit(0)
 
     if not self.log.log_dir_file:
       self._SendAlertEvent(self.atft_string.ALERT_FAIL_TO_CREATE_LOG)
@@ -1787,7 +1791,7 @@ class Atft(wx.Frame):
       The parsed configuration map.
     """
     # Give default values
-    self.atft_version = 'v0.0'
+    self.atft_version = ''
     self.compatible_atfa_version = '0'
     self.device_refresh_interval = 1.0
     self.default_key_threshold_1 = None
@@ -1825,6 +1829,14 @@ class Atft(wx.Frame):
 
     try:
       self.atft_version = str(configs['ATFT_VERSION'])
+      if self.atft_version != "v%.1f" % VERSION:
+        # Config file version mismatch.
+        if VERSION == 3.0 and self.atft_version == 'v2.0':
+          # 3.0 is compatible with v2.0 config file. Update the config version.
+          self.atft_version = 'v3.0'
+        else:
+          return None
+
       self.compatible_atfa_version = str(configs['COMPATIBLE_ATFA_VERSION'])
       self.device_refresh_interval = float(configs['DEVICE_REFRESH_INTERVAL'])
       if 'DEFAULT_KEY_THRESHOLD_1' in configs:
@@ -1958,6 +1970,8 @@ class Atft(wx.Frame):
     self.configs['DEVICE_USB_LOCATIONS'] = self.device_usb_locations
     self.configs['PASSWORD_HASH'] = self.password_hash
     self.configs['LANGUAGE'] = self.language
+    if self.atft_version:
+      self.configs['ATFT_VERSION'] = self.atft_version
     config_file_path = os.path.join(self._GetCurrentPath(), self.CONFIG_FILE)
     with open(config_file_path, 'w') as config_file:
       config_file.write(json.dumps(self.configs, sort_keys=True, indent=4))
