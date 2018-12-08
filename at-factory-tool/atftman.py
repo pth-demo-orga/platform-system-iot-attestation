@@ -604,6 +604,9 @@ class AtftManager(object):
       # booted up to prevent further fastboot failure.
       # This command actually returns the fastboot version but we ignore it.
       atfa_dev.GetVar('version')
+      # Set the date for ATFA.
+      time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+      atfa_dev.Oem('set-date ' + time)
     except FastbootFailure:
       return
     self._atfa_dev_manager.SetATFADevice(atfa_dev)
@@ -874,8 +877,6 @@ class AtftManager(object):
         target.ProvisionStatus = ProvisionStatus.SOM_PROVISION_IN_PROGRESS
       atfa = self._atfa_dev_manager.GetATFADevice()
       AtftManager.CheckDevice(atfa)
-      # Set the ATFA's time first.
-      self._atfa_dev_manager.SetTime()
       algorithm_list = self._GetAlgorithmList(target)
       algorithm = self._ChooseAlgorithm(algorithm_list)
       # First half of the DH key exchange
@@ -1285,7 +1286,6 @@ class AtfaDeviceManager(object):
     """
     # Need to set time first so that certificates would validate.
     # Set time would check atfa_dev device.
-    self.SetTime()
     self.atfa_dev.Oem('keybundle')
 
   def Update(self):
@@ -1296,7 +1296,6 @@ class AtfaDeviceManager(object):
       FastbootFailure: When fastboot command fails.
     """
     # Set time would check atfa_dev device.
-    self.SetTime()
     self.atfa_dev.Oem('update')
 
   def Reboot(self):
@@ -1380,17 +1379,6 @@ class AtfaDeviceManager(object):
       command = 'purge-som '
     AtftManager.CheckDevice(self.atfa_dev)
     self.atfa_dev.Oem(command + product_som_id)
-
-  def SetTime(self):
-    """Inject the host time into the ATFA device.
-
-    Raises:
-      DeviceNotFoundException: When the device is not found.
-      FastbootFailure: When fastboot command fails.
-    """
-    AtftManager.CheckDevice(self.atfa_dev)
-    time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-    self.atfa_dev.Oem('set-date ' + time)
 
   def PrepareFile(self, file_type):
     """Prepare a file for download.
