@@ -1866,6 +1866,14 @@ class Atft(wx.Frame):
       if 'KEY_DIR' in configs:
         self.key_dir = configs['KEY_DIR']
 
+      # For some SoC, a reboot is not required after locking down bootloader
+      # since it will reboot itself. 'SKIP_REBOOT' should be configured to True
+      # for this case.
+      if 'SKIP_REBOOT' in configs:
+        self.skip_reboot = configs['SKIP_REBOOT']
+      else:
+        self.skip_reboot = False
+
       device_usb_locations_initialized = False
       for i in range(TARGET_DEV_SIZE):
         if self.device_usb_locations[i]:
@@ -4118,7 +4126,7 @@ class Atft(wx.Frame):
         self.listing_device_lock.acquire()
         self.atft_manager.Reboot(
             target, self.reboot_timeout, LambdaSuccessCallback,
-            LambdaTimeoutCallback)
+            LambdaTimeoutCallback, self.skip_reboot)
       finally:
         self.listing_device_lock.release()
     except ProductNotSpecifiedException as e:
