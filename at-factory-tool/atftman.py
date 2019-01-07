@@ -1010,7 +1010,8 @@ class AtftManager(object):
       target.provision_status = ProvisionStatus.UNLOCKAVB_FAILED
       raise e
 
-  def Reboot(self, target, timeout, success_callback, timeout_callback):
+  def Reboot(self, target, timeout, success_callback, timeout_callback,
+             skip_reboot=False):
     """Reboot the target device.
 
     Args:
@@ -1020,6 +1021,9 @@ class AtftManager(object):
         successfully.
       timeout_callback: The callback function called when the device reboots
         timeout.
+      skip_reboot: Whether to skip reboot and only register the device as a
+        rebooting device. This is applicable if the device is already rebooting
+        and we want to register the callbacks.
     Raises:
       FastbootFailure: When fastboot command fails.
 
@@ -1028,7 +1032,8 @@ class AtftManager(object):
     otherwise call the timeout_callback.
     """
     try:
-      target.Reboot()
+      if not skip_reboot:
+        target.Reboot()
       serial = target.serial_number
       location = target.location
       # We assume after the reboot the device would disappear
