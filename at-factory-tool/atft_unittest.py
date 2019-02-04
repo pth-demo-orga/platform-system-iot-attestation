@@ -66,6 +66,7 @@ class MockAtft(atft.Atft):
     self.target_devs_components = MagicMock()
     atft.Atft.__init__(self)
     self.provision_steps = self.DEFAULT_PROVISION_STEPS_PRODUCT
+    self.skip_reboot = False
 
   def _MockParseConfig(self):
     self.atft_version = 'vTest'
@@ -225,14 +226,14 @@ class AtftTest(TestCase):
     mock_atft._CheckMappingMode.assert_not_called()
 
   def testPrintTargetDevicesMultipleDeviceMode(self):
-      # Test _PrintTargetDevices in multiple device mode.
+    # Test _PrintTargetDevices in multiple device mode.
     mock_atft = MockAtft()
     mock_serial_string = MagicMock()
     mock_atft.atft_string.FIELD_SERIAL_NUMBER = mock_serial_string
     mock_atft.atft_manager = MagicMock()
     mock_dev_components = []
     for i in range(0, 6):
-        mock_dev_components.append(MagicMock())
+      mock_dev_components.append(MagicMock())
     mock_atft.target_devs_components = mock_dev_components;
     dev1 = self.test_dev1
     dev2 = self.test_dev2
@@ -268,6 +269,54 @@ class AtftTest(TestCase):
             mock_dev_components[5], self.TEST_SERIAL2,
             '{}: {}'.format(mock_serial_string, self.TEST_SERIAL2),
             ProvisionStatus.REBOOT_IN_PROGRESS, dev2_state)
+        ])
+
+  def testPrintTargetDevicesMultipleDeviceModeReverseOrder(self):
+    # Test _PrintTargetDevices in multiple device mode with the mapped device
+    # location in descending order. This test is to verify a bug that was caused
+    # by the assumption that the mapped device location is in ascending order.
+    mock_atft = MockAtft()
+    mock_serial_string = MagicMock()
+    mock_atft.atft_string.FIELD_SERIAL_NUMBER = mock_serial_string
+    mock_atft.atft_manager = MagicMock()
+    mock_dev_components = []
+    for i in range(0, 6):
+      mock_dev_components.append(MagicMock())
+    mock_atft.target_devs_components = mock_dev_components;
+    dev1 = self.test_dev1
+    dev2 = self.test_dev2
+    dev1.provision_status = ProvisionStatus.IDLE
+    dev2.provision_status = ProvisionStatus.REBOOT_IN_PROGRESS
+    dev1_state = ProvisionState()
+    dev1.provision_state = dev1_state
+    dev2_state = ProvisionState()
+    dev2_state.bootloader_locked = True
+    dev2_state.avb_perm_attr_set = True
+    dev2_state.avb_locked = True
+    dev2.provision_state = dev2_state
+    mock_atft.atft_manager.target_devs = [dev1, dev2]
+    mock_atft.device_usb_locations = []
+    for i in range(mock_atft.TARGET_DEV_SIZE):
+      mock_atft.device_usb_locations.append(None)
+    # Two target devices at location 0 and location 5.
+    mock_atft.device_usb_locations[0] = self.TEST_LOCATION2
+    mock_atft.device_usb_locations[5] = self.TEST_LOCATION1
+    mock_atft._ShowTargetDevice = MagicMock()
+    mock_atft._PrintTargetDevices()
+    mock_atft._ShowTargetDevice.assert_has_calls([
+        call(
+            mock_dev_components[0],
+            self.TEST_SERIAL2,
+            '{}: {}'.format(mock_serial_string, self.TEST_SERIAL2),
+            ProvisionStatus.REBOOT_IN_PROGRESS, dev2_state),
+        call(mock_dev_components[1], None, '', None, None),
+        call(mock_dev_components[2], None, '', None, None),
+        call(mock_dev_components[3], None, '', None, None),
+        call(mock_dev_components[4], None, '', None, None),
+        call(
+            mock_dev_components[5], self.TEST_SERIAL1,
+            '{}: {}'.format(mock_serial_string, self.TEST_SERIAL1),
+            ProvisionStatus.IDLE, dev1_state)
         ])
 
   def testPrintTargetDevicesSingleDeviceMode(self):
@@ -1256,11 +1305,11 @@ class AtftTest(TestCase):
   def MockGetTargetDevice(self, serial):
     return self.device_map.get(serial)
 
-  def MockReboot(self, target, timeout, success, fail):
+  def MockReboot(self, target, timeout, success, fail, skip_reboot):
     success()
     target.provision_state.bootloader_locked = True
 
-  def MockRebootStateNoChange(self, target, timeout, success, fail):
+  def MockRebootStateNoChange(self, target, timeout, success, fail, skip_reboot):
     success()
     target.provision_state.bootloader_locked = False
 

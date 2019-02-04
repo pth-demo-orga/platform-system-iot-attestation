@@ -3746,7 +3746,6 @@ class Atft(wx.Frame):
           self.unmapped_target_dev_component, serial_number, serial_text,
           status, state)
     else:
-      target_dev_index = 0
       for i in range(TARGET_DEV_SIZE):
         serial_text = ''
         status = None
@@ -3755,15 +3754,13 @@ class Atft(wx.Frame):
         target_dev_component = self.target_devs_components[i]
         if self.device_usb_locations[i]:
           target_dev_component.active = True
-          if (target_dev_index < len(target_devs) and
-              (target_devs[target_dev_index].location ==
-               self.device_usb_locations[i])):
-            serial_number = target_devs[target_dev_index].serial_number
-            serial_text = '{}: {}'.format(
-                self.atft_string.FIELD_SERIAL_NUMBER, str(serial_number))
-            status = target_devs[target_dev_index].provision_status
-            state = target_devs[target_dev_index].provision_state
-            target_dev_index += 1
+          for target_dev in target_devs:
+            if (target_dev.location == self.device_usb_locations[i]):
+              serial_number = target_dev.serial_number
+              serial_text = '{}: {}'.format(
+                  self.atft_string.FIELD_SERIAL_NUMBER, str(serial_number))
+              status = target_dev.provision_status
+              state = target_dev.provision_state
         else:
           target_dev_component.active = False
         self._ShowTargetDevice(
