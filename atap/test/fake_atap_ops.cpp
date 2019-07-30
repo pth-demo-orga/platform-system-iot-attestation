@@ -33,7 +33,7 @@ FakeAtapOps::~FakeAtapOps() {}
 
 AtapResult FakeAtapOps::read_product_id(
     uint8_t product_id[ATAP_PRODUCT_ID_LEN]) {
-  memset(product_id, 0x00, ATAP_PRODUCT_ID_LEN);
+  atap_memset(product_id, 0x00, ATAP_PRODUCT_ID_LEN);
   return ATAP_RESULT_OK;
 }
 
